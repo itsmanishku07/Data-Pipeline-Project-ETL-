@@ -1,0 +1,425 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Layers, 
+  Trash2, 
+  ArrowRight, 
+  ArrowLeft,
+  Plus, 
+  Sliders, 
+  HardDrive,
+  GitBranch,
+  Sparkles,
+  Database,
+  PlayCircle,
+  FolderOpen,
+  Search,
+  CheckCircle2,
+  Table as TableIcon,
+  Info,
+  Calendar,
+  FileCode
+} from 'lucide-react';
+import { DataFlowAPI } from '../../services/api';
+import { DataGrid } from '../common/DataGrid';
+
+export const StagingAreaView = ({
+  initialDatasetId,
+  activeFlowId,
+  onSelectFlow,
+  onSelectDatasetForTransform,
+  onAddNewSource,
+}) => {
+  const [datasets, setDatasets] = useState([]);
+  const [activeDataset, setActiveDataset] = useState(null);
+  const [activeTab, setActiveTab] = useState('preview'); // 'preview', 'schema', 'lineage'
+  const [previewData, setPreviewData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [searchStage, setSearchStage] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  const loadStagedDatasets = async () => {
+    setLoading(true);
+    try {
+      const dsList = await DataFlowAPI.listStagedDatasets(activeFlowId || null);
+      setDatasets(dsList);
+    } catch (err) {
+      console.error('Failed to load staged datasets', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStagedDatasets();
+  }, [activeFlowId]);
+
+  const handleSelectStage = async (ds) => {
+    setActiveDataset(ds);
+    setActiveTab('preview');
+    setCurrentPage(1);
+    try {
+      const data = await DataFlowAPI.getDatasetPreview(ds.id, 1, pageSize);
+      setPreviewData(data);
+    } catch (err) {
+      console.error('Failed to load preview for stage', err);
+    }
+  };
+
+  const handleBackToGallery = () => {
+    setActiveDataset(null);
+    setPreviewData(null);
+  };
+
+  const handlePageChange = async (page) => {
+    if (!activeDataset) return;
+    setCurrentPage(page);
+    try {
+      const data = await DataFlowAPI.getDatasetPreview(activeDataset.id, page, pageSize);
+      setPreviewData(data);
+    } catch (err) {
+      console.error('Failed to load preview page', err);
+    }
+  };
+
+  const handleDeleteStage = async (stageId, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this staged dataset?')) return;
+    try {
+      await DataFlowAPI.deleteStagedDataset(stageId);
+      const updated = datasets.filter((d) => d.id !== stageId);
+      setDatasets(updated);
+      if (activeDataset?.id === stageId) {
+        setActiveDataset(null);
+        setPreviewData(null);
+      }
+    } catch (err) {
+      console.error('Delete stage error', err);
+    }
+  };
+
+  const filteredStages = datasets.filter((ds) => {
+    if (!searchStage.trim()) return true;
+    const term = searchStage.toLowerCase();
+    return ds.name.toLowerCase().includes(term) || (ds.source_type && ds.source_type.toLowerCase().includes(term));
+  });
+
+  // ==========================================
+  // LEVEL 1: CLEAN SAVED STAGES GALLERY
+  // ==========================================
+  if (!activeDataset) {
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        {/* Gallery Top Banner */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30">
+              <HardDrive className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Lakehouse Staged Stages & Datasets ({datasets.length})
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Click on any saved stage to inspect its data preview, schema profiles, and lineage.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2.5">
+            {datasets.length > 0 && (
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search stages..."
+                  value={searchStage}
+                  onChange={(e) => setSearchStage(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-48 font-sans"
+                />
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={onAddNewSource}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Connect & Stage Source</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Saved Stages Cards Grid */}
+        {datasets.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-12 text-center text-slate-500 dark:text-slate-400 text-xs space-y-3">
+            <FolderOpen className="w-10 h-10 text-slate-400 mx-auto mb-1" />
+            <h3 className="text-sm font-bold text-slate-800 dark:text-white">No Staged Datasets Yet</h3>
+            <p className="max-w-sm mx-auto text-slate-400">
+              Connect a source in Step 1, apply schema casting in Step 2, and stage it into the Lakehouse.
+            </p>
+            <button
+              type="button"
+              onClick={onAddNewSource}
+              className="mt-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 font-bold inline-flex items-center space-x-1.5 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Connect First Source</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredStages.map((ds) => (
+              <div
+                key={ds.id}
+                onClick={() => handleSelectStage(ds)}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-900 dark:hover:border-sky-500 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4"
+              >
+                <div>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-2 min-w-0 pr-1">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/20 shrink-0">
+                        <HardDrive className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="font-bold text-xs text-slate-900 dark:text-white truncate group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
+                        {ds.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        {ds.source_type}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteStage(ds.id, e)}
+                        className="text-slate-400 hover:text-rose-600 p-0.5"
+                        title="Delete staged dataset"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                    {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 space-x-2">
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{ds.row_count.toLocaleString()}</strong> rows
+                    <span>•</span>
+                    <span>{ds.column_count} cols</span>
+                  </div>
+
+                  <span className="text-xs font-bold text-slate-900 dark:text-sky-400 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
+                    <span>Inspect Data</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ==========================================
+  // LEVEL 2: DEDICATED STAGE DETAILS & PREVIEW
+  // ==========================================
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      {/* Top Navigation Bar with Back Button */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <button
+            type="button"
+            onClick={handleBackToGallery}
+            className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center space-x-1 text-xs font-semibold"
+            title="Back to all stages"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>All Stages</span>
+          </button>
+
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 uppercase">
+                MYSQL STAGE TABLE
+              </span>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{activeDataset.name}</h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+              ID: {activeDataset.id} • {activeDataset.row_count.toLocaleString()} rows • {activeDataset.column_count} columns • {activeDataset.storage_format.toUpperCase()}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={(e) => handleDeleteStage(activeDataset.id, e)}
+            className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Stage</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectDatasetForTransform(activeDataset)}
+            className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Transform This Stage</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Sub-Tabs: Data Preview, Schema & Types, Lineage Metadata */}
+      <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-fit">
+        <button
+          type="button"
+          onClick={() => setActiveTab('preview')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+            activeTab === 'preview'
+              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <TableIcon className="w-3.5 h-3.5" />
+          <span>Data Preview ({activeDataset.row_count.toLocaleString()})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('schema')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+            activeTab === 'schema'
+              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <FileCode className="w-3.5 h-3.5" />
+          <span>Schema & Types ({activeDataset.column_count})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('lineage')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+            activeTab === 'lineage'
+              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Info className="w-3.5 h-3.5" />
+          <span>Stage Lineage & File Metadata</span>
+        </button>
+      </div>
+
+      {/* 1. DATA PREVIEW TAB */}
+      {activeTab === 'preview' && previewData && (
+        <DataGrid
+          title={`Stage Preview: ${activeDataset.name}`}
+          subtitle={`Stored in MySQL Database Table • ${previewData.total_rows.toLocaleString()} total rows across ${activeDataset.column_count} columns`}
+          columns={activeDataset.columns}
+          rows={previewData.rows}
+          totalRows={previewData.total_rows}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={handlePageChange}
+        />
+      )}
+
+      {/* 2. SCHEMA & TYPES TAB */}
+      {activeTab === 'schema' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm transition-colors">
+          <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+            <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              Column Schema & Data Types Profile
+            </h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse font-mono text-xs">
+              <thead className="bg-slate-100 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-400">
+                <tr>
+                  <th className="py-2.5 px-3">Column Name</th>
+                  <th className="py-2.5 px-3">Spark Data Type</th>
+                  <th className="py-2.5 px-3">Nullable</th>
+                  <th className="py-2.5 px-3">Null Count</th>
+                  <th className="py-2.5 px-3">Distinct Count</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/40">
+                {activeDataset.columns.map((col) => (
+                  <tr key={col.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white font-sans">{col.name}</td>
+                    <td className="py-2 px-3">
+                      <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400 font-bold text-[10px]">
+                        {col.spark_type}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-slate-500">{col.nullable ? 'Yes' : 'No'}</td>
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-300">{col.null_count || 0}</td>
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-300">{col.distinct_count || 'N/A'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. STAGE LINEAGE & METADATA TAB */}
+      {activeTab === 'lineage' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4 transition-colors">
+          <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+            Stage Lineage & Storage Information
+          </h4>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
+              <span className="font-semibold text-slate-700 dark:text-slate-300 block font-sans">Storage Metadata</span>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Storage Engine:</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">MYSQL TABLE</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Storage Format:</span>
+                <span className="text-slate-800 dark:text-slate-200 uppercase">{activeDataset.storage_format}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Created:</span>
+                <span className="text-slate-800 dark:text-slate-200">{new Date(activeDataset.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
+              <span className="font-semibold text-slate-700 dark:text-slate-300 block font-sans">Source Provenance</span>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Source Type:</span>
+                <span className="text-sky-600 dark:text-sky-400 font-bold uppercase">{activeDataset.source_type}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block mb-0.5">Summary:</span>
+                <p className="text-slate-800 dark:text-slate-200 truncate">{activeDataset.source_summary || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">Database Table URI:</span>
+            <pre className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-sky-300 font-mono text-[11px] truncate">
+              {activeDataset.storage_path}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
