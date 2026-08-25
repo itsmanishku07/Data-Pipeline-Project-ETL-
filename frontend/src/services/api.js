@@ -1,7 +1,23 @@
 import axios from 'axios';
 
+// Dynamically resolve Backend API Base URL from VITE_API_BASE_URL env variable
+const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!envUrl) {
+    return '/api';
+  }
+  const clean = envUrl.trim().replace(/\/+$/, '');
+  // If the user configured root URL (e.g. https://my-backend.vercel.app), append /api
+  if (!clean.endsWith('/api')) {
+    return `${clean}/api`;
+  }
+  return clean;
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -145,7 +161,7 @@ export const DataFlowAPI = {
   },
 
   getExportDownloadUrl: (filename) => {
-    return `/api/jobs/export/${filename}`;
+    return `${API_BASE_URL}/jobs/download/${filename}`;
   },
 
   // Metadata & History
