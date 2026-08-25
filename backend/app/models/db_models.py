@@ -44,8 +44,8 @@ def get_db_connection():
     return "sqlite", None
 
 def init_db():
-    """Initializes tables in both MySQL (if accessible) and SQLite catalog."""
-    # 1. Initialize SQLite catalog (always as reliable fallback)
+    """Initializes metadata tables in MySQL (if accessible) and SQLite catalog fallback."""
+    # 1. Initialize SQLite catalog fallback
     settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.CATALOG_DB_PATH)
     cursor = conn.cursor()
@@ -153,20 +153,10 @@ def init_db():
     )
     """)
 
-    # Ensure flow_id column exists in existing tables if created previously
-    try:
-        cursor.execute("ALTER TABLE staged_datasets ADD COLUMN flow_id TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE pipeline_jobs ADD COLUMN flow_id TEXT")
-    except Exception:
-        pass
-
     conn.commit()
     conn.close()
 
-    # 2. If MySQL is available, create the tables in MySQL
+    # 2. Initialize MySQL tables if accessible
     db_type, engine = get_db_connection()
     if db_type == "mysql" and engine is not None:
         try:
@@ -179,7 +169,8 @@ def init_db():
                     category VARCHAR(64) DEFAULT 'General',
                     status VARCHAR(32) DEFAULT 'active',
                     created_at DATETIME NOT NULL,
-                    updated_at DATETIME NULL
+                    updated_at DATETIME NULL,
+                    INDEX idx_flows_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -193,10 +184,12 @@ def init_db():
                     row_count INT DEFAULT 0,
                     column_count INT DEFAULT 0,
                     storage_path TEXT NOT NULL,
-                    storage_format VARCHAR(32) DEFAULT 'parquet',
+                    storage_format VARCHAR(32) DEFAULT 'mysql_table',
                     columns_json JSON NOT NULL,
                     file_size_bytes BIGINT DEFAULT 0,
-                    created_at DATETIME NOT NULL
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_ds_flow (flow_id),
+                    INDEX idx_ds_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -214,7 +207,9 @@ def init_db():
                     output_dataset_id VARCHAR(64) NULL,
                     output_file_path TEXT NULL,
                     logs_json JSON NOT NULL,
-                    error TEXT NULL
+                    error TEXT NULL,
+                    INDEX idx_jobs_flow (flow_id),
+                    INDEX idx_jobs_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -225,7 +220,8 @@ def init_db():
                     entity_type VARCHAR(64) NULL,
                     summary VARCHAR(255) NOT NULL,
                     details_json JSON NULL,
-                    created_at DATETIME NOT NULL
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_audit_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -239,9 +235,10 @@ def init_db():
                     row_count INT DEFAULT 0,
                     column_count INT DEFAULT 0,
                     duration_ms FLOAT DEFAULT 0.0,
-                    status VARCHAR(32) DEFAULT 'SUCCESS',
+                    status VARCHAR(32) NOT NULL DEFAULT 'SUCCESS',
                     error_message TEXT NULL,
-                    created_at DATETIME NOT NULL
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_ingest_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -253,7 +250,8 @@ def init_db():
                     initial_rows INT DEFAULT 0,
                     transformed_rows INT DEFAULT 0,
                     execution_time_ms FLOAT DEFAULT 0.0,
-                    created_at DATETIME NOT NULL
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_trans_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -264,7 +262,8 @@ def init_db():
                     summary TEXT NULL,
                     config_json JSON NOT NULL,
                     created_at DATETIME NOT NULL,
-                    updated_at DATETIME NULL
+                    updated_at DATETIME NULL,
+                    INDEX idx_conn_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.commit()
@@ -274,39 +273,25 @@ def init_db():
 # Run initialization at module load
 init_db()
 
+def _format_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper to ensure all datetime values in a record are ISO 8601 formatted strings."""
+    out = {}
+    for k, v in row_dict.items():
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
+
 class CatalogDB:
     # --- SAVED SOURCE CONNECTIONS ---
     @staticmethod
     def save_connection(conn_dict: Dict[str, Any]) -> Dict[str, Any]:
-        init_db()
         conn_id = conn_dict.get("id") or f"conn_{uuid.uuid4().hex[:8]}"
         now_str = datetime.utcnow().isoformat()
         config_json_str = json.dumps(conn_dict.get("config", {}))
 
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT OR REPLACE INTO saved_connections (id, name, source_type, summary, config_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            conn_id,
-            conn_dict["name"],
-            conn_dict["source_type"],
-            conn_dict.get("summary", ""),
-            config_json_str,
-            now_str,
-            now_str
-        ))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="CONNECTION_SAVED",
-            entity_id=conn_id,
-            entity_type="DATA_SOURCE",
-            summary=f"Saved {conn_dict['source_type'].upper()} connection '{conn_dict['name']}'"
-        )
-
+        # 1. MySQL First
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
             try:
@@ -326,53 +311,125 @@ class CatalogDB:
             except Exception:
                 pass
 
+        # 2. SQLite Sync
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO saved_connections (id, name, source_type, summary, config_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (conn_id, conn_dict["name"], conn_dict["source_type"], conn_dict.get("summary", ""), config_json_str, now_str, now_str))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="CONNECTION_SAVED",
+            entity_id=conn_id,
+            entity_type="DATA_SOURCE",
+            summary=f"Saved {conn_dict['source_type'].upper()} connection '{conn_dict['name']}'"
+        )
+
         return CatalogDB.get_saved_connection(conn_id)
 
     @staticmethod
     def get_saved_connection(conn_id: str) -> Optional[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM saved_connections WHERE id = ?", (conn_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        d = dict(row)
-        d["config"] = json.loads(d["config_json"])
-        del d["config_json"]
-        return d
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_saved_connections WHERE id = :id"), {"id": conn_id})
+                    row = res.fetchone()
+                    if row:
+                        d = _format_row(dict(row._mapping))
+                        d["config"] = json.loads(d["config_json"]) if isinstance(d.get("config_json"), str) else (d.get("config_json") or {})
+                        d.pop("config_json", None)
+                        return d
+            except Exception:
+                pass
+
+        # Fallback to SQLite
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM saved_connections WHERE id = ?", (conn_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                d = dict(row)
+                d["config"] = json.loads(d["config_json"]) if isinstance(d.get("config_json"), str) else (d.get("config_json") or {})
+                d.pop("config_json", None)
+                return d
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def list_saved_connections(source_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if source_type:
-            cursor.execute("SELECT * FROM saved_connections WHERE source_type = ? ORDER BY updated_at DESC", (source_type,))
-        else:
-            cursor.execute("SELECT * FROM saved_connections ORDER BY updated_at DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["config"] = json.loads(d["config_json"])
-            del d["config_json"]
-            results.append(d)
-        return results
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    if source_type:
+                        res = mconn.execute(text("SELECT * FROM dataflow_saved_connections WHERE source_type = :st ORDER BY updated_at DESC"), {"st": source_type})
+                    else:
+                        res = mconn.execute(text("SELECT * FROM dataflow_saved_connections ORDER BY updated_at DESC"))
+                    rows = res.fetchall()
+                    results = []
+                    for r in rows:
+                        d = _format_row(dict(r._mapping))
+                        d["config"] = json.loads(d["config_json"]) if isinstance(d.get("config_json"), str) else (d.get("config_json") or {})
+                        d.pop("config_json", None)
+                        results.append(d)
+                    return results
+            except Exception:
+                pass
+
+        # Fallback to SQLite
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if source_type:
+                cursor.execute("SELECT * FROM saved_connections WHERE source_type = ? ORDER BY updated_at DESC", (source_type,))
+            else:
+                cursor.execute("SELECT * FROM saved_connections ORDER BY updated_at DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["config"] = json.loads(d["config_json"]) if isinstance(d.get("config_json"), str) else (d.get("config_json") or {})
+                d.pop("config_json", None)
+                results.append(d)
+            return results
+        except Exception:
+            return []
 
     @staticmethod
     def delete_saved_connection(conn_id: str) -> bool:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM saved_connections WHERE id = ?", (conn_id,))
-        affected = cursor.rowcount
-        conn.commit()
-        conn.close()
+        affected = 0
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("DELETE FROM dataflow_saved_connections WHERE id = :id"), {"id": conn_id})
+                    mconn.commit()
+                    affected += res.rowcount
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM saved_connections WHERE id = ?", (conn_id,))
+            affected += cursor.rowcount
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
         CatalogDB.record_audit_log(
             event_type="CONNECTION_DELETED",
@@ -380,49 +437,15 @@ class CatalogDB:
             entity_type="DATA_SOURCE",
             summary=f"Deleted saved connection {conn_id}"
         )
+        return True
 
-        db_type, engine = get_db_connection()
-        if db_type == "mysql" and engine is not None:
-            try:
-                with engine.connect() as mconn:
-                    mconn.execute(text("DELETE FROM dataflow_saved_connections WHERE id = :id"), {"id": conn_id})
-                    mconn.commit()
-            except Exception:
-                pass
-
-        return affected > 0
     # --- FLOW MANAGEMENT ---
     @staticmethod
     def create_flow(flow_dict: Dict[str, Any]) -> Dict[str, Any]:
-        init_db()
         flow_id = flow_dict.get("id") or f"flow_{uuid.uuid4().hex[:8]}"
         now_str = datetime.utcnow().isoformat()
 
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT INTO flows (id, name, description, category, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            flow_id,
-            flow_dict["name"],
-            flow_dict.get("description", ""),
-            flow_dict.get("category", "General"),
-            flow_dict.get("status", "active"),
-            now_str,
-            now_str
-        ))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="FLOW_CREATED",
-            entity_id=flow_id,
-            entity_type="DATA_FLOW",
-            summary=f"Created new data flow: '{flow_dict['name']}' ({flow_dict.get('category', 'General')})",
-            details=flow_dict
-        )
-
+        # 1. MySQL First
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
             try:
@@ -430,6 +453,7 @@ class CatalogDB:
                     mconn.execute(text("""
                     INSERT INTO dataflow_flows (id, name, description, category, status, created_at, updated_at)
                     VALUES (:id, :name, :description, :category, :status, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE name=:name, description=:description, category=:category, status=:status, updated_at=NOW()
                     """), {
                         "id": flow_id,
                         "name": flow_dict["name"],
@@ -441,58 +465,126 @@ class CatalogDB:
             except Exception:
                 pass
 
+        # 2. SQLite Sync
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO flows (id, name, description, category, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (flow_id, flow_dict["name"], flow_dict.get("description", ""), flow_dict.get("category", "General"), flow_dict.get("status", "active"), now_str, now_str))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="FLOW_CREATED",
+            entity_id=flow_id,
+            entity_type="DATA_FLOW",
+            summary=f"Created new data flow: '{flow_dict['name']}' ({flow_dict.get('category', 'General')})",
+            details=flow_dict
+        )
+
         return CatalogDB.get_flow(flow_id)
 
     @staticmethod
     def list_flows() -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM flows ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        
-        flows = []
-        for r in rows:
-            f = dict(r)
-            # Count staged datasets linked to this flow
-            cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (f["id"],))
-            ds_count, total_rows = cursor.fetchone()
-            f["dataset_count"] = ds_count
-            f["total_rows"] = total_rows
-            flows.append(f)
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_flows ORDER BY created_at DESC"))
+                    rows = res.fetchall()
+                    flows = []
+                    for r in rows:
+                        f = _format_row(dict(r._mapping))
+                        # Fetch linked dataset count & row count
+                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL"), {"fid": f["id"]})
+                        ds_count, total_rows = ds_res.fetchone()
+                        f["dataset_count"] = ds_count or 0
+                        f["total_rows"] = int(total_rows or 0)
+                        flows.append(f)
+                    return flows
+            except Exception:
+                pass
 
-        conn.close()
-        return flows
+        # Fallback to SQLite
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM flows ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            flows = []
+            for r in rows:
+                f = dict(r)
+                cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (f["id"],))
+                ds_count, total_rows = cursor.fetchone()
+                f["dataset_count"] = ds_count or 0
+                f["total_rows"] = int(total_rows or 0)
+                flows.append(f)
+            conn.close()
+            return flows
+        except Exception:
+            return []
 
     @staticmethod
     def get_flow(flow_id: str) -> Optional[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM flows WHERE id = ?", (flow_id,))
-        row = cursor.fetchone()
-        if not row:
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_flows WHERE id = :id"), {"id": flow_id})
+                    row = res.fetchone()
+                    if row:
+                        f = _format_row(dict(row._mapping))
+                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL"), {"fid": flow_id})
+                        ds_count, total_rows = ds_res.fetchone()
+                        f["dataset_count"] = ds_count or 0
+                        f["total_rows"] = int(total_rows or 0)
+                        return f
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM flows WHERE id = ?", (flow_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return None
+            f = dict(row)
+            cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (flow_id,))
+            ds_count, total_rows = cursor.fetchone()
+            f["dataset_count"] = ds_count or 0
+            f["total_rows"] = int(total_rows or 0)
             conn.close()
+            return f
+        except Exception:
             return None
-        f = dict(row)
-        cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (flow_id,))
-        ds_count, total_rows = cursor.fetchone()
-        f["dataset_count"] = ds_count
-        f["total_rows"] = total_rows
-        conn.close()
-        return f
 
     @staticmethod
     def delete_flow(flow_id: str) -> bool:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM flows WHERE id = ?", (flow_id,))
-        affected = cursor.rowcount
-        conn.commit()
-        conn.close()
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("DELETE FROM dataflow_flows WHERE id = :id"), {"id": flow_id})
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM flows WHERE id = ?", (flow_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
         CatalogDB.record_audit_log(
             event_type="FLOW_DELETED",
@@ -500,24 +592,14 @@ class CatalogDB:
             entity_type="DATA_FLOW",
             summary=f"Deleted data flow {flow_id}"
         )
-        return affected > 0
+        return True
 
     # --- AUDIT & INGESTION ---
     @staticmethod
     def record_audit_log(event_type: str, summary: str, entity_id: Optional[str] = None, entity_type: Optional[str] = None, details: Optional[Any] = None):
-        init_db()
         log_id = f"aud_{uuid.uuid4().hex[:10]}"
         now_str = datetime.utcnow().isoformat()
         details_str = json.dumps(details) if details is not None else None
-
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT INTO audit_logs (id, event_type, entity_id, entity_type, summary, details_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (log_id, event_type, entity_id, entity_type, summary, details_str, now_str))
-        conn.commit()
-        conn.close()
 
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
@@ -538,28 +620,22 @@ class CatalogDB:
             except Exception:
                 pass
 
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO audit_logs (id, event_type, entity_id, entity_type, summary, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (log_id, event_type, entity_id, entity_type, summary, details_str, now_str))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     @staticmethod
     def record_ingestion(source_name: str, source_type: str, host: Optional[str] = None, database_name: Optional[str] = None, table_query: Optional[str] = None, row_count: int = 0, column_count: int = 0, duration_ms: float = 0.0, status: str = "SUCCESS", error_message: Optional[str] = None):
-        init_db()
         ingest_id = f"ing_{uuid.uuid4().hex[:10]}"
         now_str = datetime.utcnow().isoformat()
-
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT INTO ingestion_history (id, source_name, source_type, host, database_name, table_query, row_count, column_count, duration_ms, status, error_message, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (ingest_id, source_name, source_type, host, database_name, table_query, row_count, column_count, duration_ms, status, error_message, now_str))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="DATA_INGESTED",
-            entity_id=ingest_id,
-            entity_type="SOURCE",
-            summary=f"Extracted {row_count} rows from {source_name} ({source_type}) in {round(duration_ms, 2)}ms",
-            details={"source_name": source_name, "source_type": source_type, "rows": row_count, "cols": column_count}
-        )
 
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
@@ -585,29 +661,23 @@ class CatalogDB:
             except Exception:
                 pass
 
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO ingestion_history (id, source_name, source_type, host, database_name, table_query, row_count, column_count, duration_ms, status, error_message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (ingest_id, source_name, source_type, host, database_name, table_query, row_count, column_count, duration_ms, status, error_message, now_str))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     @staticmethod
     def record_transformation(staging_dataset_id: str, rule_count: int, rules: List[Any], initial_rows: int, transformed_rows: int, execution_time_ms: float):
-        init_db()
         tx_id = f"tx_{uuid.uuid4().hex[:10]}"
         now_str = datetime.utcnow().isoformat()
         rules_json_str = json.dumps([r if isinstance(r, dict) else (r.dict() if hasattr(r, "dict") else str(r)) for r in rules])
-
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT INTO transformation_history (id, staging_dataset_id, rule_count, rules_json, initial_rows, transformed_rows, execution_time_ms, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (tx_id, staging_dataset_id, rule_count, rules_json_str, initial_rows, transformed_rows, execution_time_ms, now_str))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="TRANSFORMATION_EXECUTED",
-            entity_id=tx_id,
-            entity_type="DATASET",
-            summary=f"Applied {rule_count} Spark transformation rules on {staging_dataset_id}: {initial_rows} -> {transformed_rows} rows",
-            details={"dataset_id": staging_dataset_id, "rules": rule_count, "execution_time_ms": execution_time_ms}
-        )
 
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
@@ -629,47 +699,27 @@ class CatalogDB:
             except Exception:
                 pass
 
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO transformation_history (id, staging_dataset_id, rule_count, rules_json, initial_rows, transformed_rows, execution_time_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (tx_id, staging_dataset_id, rule_count, rules_json_str, initial_rows, transformed_rows, execution_time_ms, now_str))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     record_transformation_event = record_transformation
 
     # --- STAGING DATASETS ---
     @staticmethod
     def save_staged_dataset(dataset_dict: Dict[str, Any]):
-        init_db()
         created_str = dataset_dict["created_at"] if isinstance(dataset_dict["created_at"], str) else dataset_dict["created_at"].isoformat()
         columns_json_str = json.dumps([col.dict() if hasattr(col, "dict") else col for col in dataset_dict["columns"]])
 
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT OR REPLACE INTO staged_datasets 
-        (id, flow_id, name, description, source_type, source_summary, row_count, column_count, storage_path, storage_format, created_at, columns_json, file_size_bytes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            dataset_dict["id"],
-            dataset_dict.get("flow_id"),
-            dataset_dict["name"],
-            dataset_dict.get("description", ""),
-            dataset_dict["source_type"] if isinstance(dataset_dict["source_type"], str) else dataset_dict["source_type"].value,
-            dataset_dict.get("source_summary", ""),
-            dataset_dict["row_count"],
-            dataset_dict["column_count"],
-            dataset_dict["storage_path"],
-            dataset_dict.get("storage_format", "parquet"),
-            created_str,
-            columns_json_str,
-            dataset_dict.get("file_size_bytes", 0)
-        ))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="DATASET_STAGED",
-            entity_id=dataset_dict["id"],
-            entity_type="STAGED_DATASET",
-            summary=f"Staged dataset '{dataset_dict['name']}' ({dataset_dict['row_count']} rows, {dataset_dict['column_count']} cols) to Lakehouse",
-            details={"id": dataset_dict["id"], "flow_id": dataset_dict.get("flow_id"), "format": dataset_dict.get("storage_format", "parquet")}
-        )
-
+        # 1. MySQL First
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
             try:
@@ -679,7 +729,7 @@ class CatalogDB:
                     (id, flow_id, name, description, source_type, source_summary, row_count, column_count, storage_path, storage_format, columns_json, file_size_bytes, created_at)
                     VALUES (:id, :flow_id, :name, :description, :source_type, :source_summary, :row_count, :column_count, :storage_path, :storage_format, :columns_json, :file_size_bytes, NOW())
                     ON DUPLICATE KEY UPDATE 
-                        flow_id=:flow_id, name=:name, description=:description, row_count=:row_count, column_count=:column_count, file_size_bytes=:file_size_bytes
+                        flow_id=:flow_id, name=:name, description=:description, row_count=:row_count, column_count=:column_count, storage_path=:storage_path, storage_format=:storage_format, file_size_bytes=:file_size_bytes
                     """), {
                         "id": dataset_dict["id"],
                         "flow_id": dataset_dict.get("flow_id"),
@@ -690,7 +740,7 @@ class CatalogDB:
                         "row_count": dataset_dict["row_count"],
                         "column_count": dataset_dict["column_count"],
                         "storage_path": dataset_dict["storage_path"],
-                        "storage_format": dataset_dict.get("storage_format", "parquet"),
+                        "storage_format": dataset_dict.get("storage_format", "mysql_table"),
                         "columns_json": columns_json_str,
                         "file_size_bytes": dataset_dict.get("file_size_bytes", 0)
                     })
@@ -698,51 +748,136 @@ class CatalogDB:
             except Exception:
                 pass
 
+        # 2. SQLite Sync
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO staged_datasets 
+            (id, flow_id, name, description, source_type, source_summary, row_count, column_count, storage_path, storage_format, created_at, columns_json, file_size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                dataset_dict["id"],
+                dataset_dict.get("flow_id"),
+                dataset_dict["name"],
+                dataset_dict.get("description", ""),
+                dataset_dict["source_type"] if isinstance(dataset_dict["source_type"], str) else dataset_dict["source_type"].value,
+                dataset_dict.get("source_summary", ""),
+                dataset_dict["row_count"],
+                dataset_dict["column_count"],
+                dataset_dict["storage_path"],
+                dataset_dict.get("storage_format", "mysql_table"),
+                created_str,
+                columns_json_str,
+                dataset_dict.get("file_size_bytes", 0)
+            ))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="DATASET_STAGED",
+            entity_id=dataset_dict["id"],
+            entity_type="STAGED_DATASET",
+            summary=f"Staged dataset '{dataset_dict['name']}' ({dataset_dict['row_count']} rows, {dataset_dict['column_count']} cols) to MySQL Database",
+            details={"id": dataset_dict["id"], "flow_id": dataset_dict.get("flow_id"), "format": dataset_dict.get("storage_format", "mysql_table")}
+        )
+
     @staticmethod
     def get_staged_dataset(dataset_id: str) -> Optional[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM staged_datasets WHERE id = ?", (dataset_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets WHERE id = :id"), {"id": dataset_id})
+                    row = res.fetchone()
+                    if row:
+                        d = _format_row(dict(row._mapping))
+                        d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
+                        d.pop("columns_json", None)
+                        return d
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM staged_datasets WHERE id = ?", (dataset_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return None
+            d = dict(row)
+            d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
+            d.pop("columns_json", None)
+            return d
+        except Exception:
             return None
-        d = dict(row)
-        d["columns"] = json.loads(d["columns_json"])
-        del d["columns_json"]
-        return d
 
     @staticmethod
     def list_staged_datasets(flow_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if flow_id:
-            cursor.execute("SELECT * FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL ORDER BY created_at DESC", (flow_id,))
-        else:
-            cursor.execute("SELECT * FROM staged_datasets ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["columns"] = json.loads(d["columns_json"])
-            del d["columns_json"]
-            results.append(d)
-        return results
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    if flow_id:
+                        res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL ORDER BY created_at DESC"), {"fid": flow_id})
+                    else:
+                        res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets ORDER BY created_at DESC"))
+                    rows = res.fetchall()
+                    results = []
+                    for r in rows:
+                        d = _format_row(dict(r._mapping))
+                        d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
+                        d.pop("columns_json", None)
+                        results.append(d)
+                    return results
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if flow_id:
+                cursor.execute("SELECT * FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL ORDER BY created_at DESC", (flow_id,))
+            else:
+                cursor.execute("SELECT * FROM staged_datasets ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
+                d.pop("columns_json", None)
+                results.append(d)
+            return results
+        except Exception:
+            return []
 
     @staticmethod
     def delete_staged_dataset(dataset_id: str) -> bool:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM staged_datasets WHERE id = ?", (dataset_id,))
-        affected = cursor.rowcount
-        conn.commit()
-        conn.close()
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("DELETE FROM dataflow_staged_datasets WHERE id = :id"), {"id": dataset_id})
+                    clean_id = dataset_id.replace("-", "_")
+                    mconn.execute(text(f"DROP TABLE IF EXISTS `stg_data_{clean_id}`"))
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM staged_datasets WHERE id = ?", (dataset_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
         CatalogDB.record_audit_log(
             event_type="DATASET_DELETED",
@@ -750,47 +885,13 @@ class CatalogDB:
             entity_type="STAGED_DATASET",
             summary=f"Deleted staged dataset {dataset_id}"
         )
-        return affected > 0
+        return True
 
     # --- PIPELINE JOBS ---
     @staticmethod
     def save_job(job_dict: Dict[str, Any]):
-        init_db()
         created_str = job_dict["created_at"] if isinstance(job_dict["created_at"], str) else job_dict["created_at"].isoformat()
         logs_json_str = json.dumps(job_dict.get("logs", []))
-
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT OR REPLACE INTO pipeline_jobs
-        (id, flow_id, name, status, progress, message, input_rows, output_rows, created_at, completed_at, output_dataset_id, output_file_path, logs_json, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            job_dict["id"],
-            job_dict.get("flow_id"),
-            job_dict["name"],
-            job_dict["status"],
-            job_dict.get("progress", 0.0),
-            job_dict.get("message", ""),
-            job_dict.get("input_rows", 0),
-            job_dict.get("output_rows", 0),
-            created_str,
-            job_dict.get("completed_at"),
-            job_dict.get("output_dataset_id"),
-            job_dict.get("output_file_path"),
-            logs_json_str,
-            job_dict.get("error")
-        ))
-        conn.commit()
-        conn.close()
-
-        CatalogDB.record_audit_log(
-            event_type="PIPELINE_JOB_STATUS",
-            entity_id=job_dict["id"],
-            entity_type="JOB",
-            summary=f"Job '{job_dict['name']}' status changed to {job_dict['status']} (processed {job_dict.get('output_rows', 0)} rows)",
-            details={"status": job_dict["status"], "flow_id": job_dict.get("flow_id"), "progress": job_dict.get("progress", 0.0)}
-        )
 
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
@@ -801,7 +902,7 @@ class CatalogDB:
                     (id, flow_id, name, status, progress, message, input_rows, output_rows, created_at, completed_at, output_dataset_id, output_file_path, logs_json, error)
                     VALUES (:id, :flow_id, :name, :status, :progress, :message, :input_rows, :output_rows, NOW(), NULL, :output_dataset_id, :output_file_path, :logs_json, :error)
                     ON DUPLICATE KEY UPDATE 
-                        status=:status, progress=:progress, message=:message, output_rows=:output_rows, completed_at=NOW(), error=:error
+                        status=:status, progress=:progress, message=:message, output_rows=:output_rows, completed_at=NOW(), output_dataset_id=:output_dataset_id, output_file_path=:output_file_path, logs_json=:logs_json, error=:error
                     """), {
                         "id": job_dict["id"],
                         "flow_id": job_dict.get("flow_id"),
@@ -820,140 +921,266 @@ class CatalogDB:
             except Exception:
                 pass
 
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO pipeline_jobs
+            (id, flow_id, name, status, progress, message, input_rows, output_rows, created_at, completed_at, output_dataset_id, output_file_path, logs_json, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                job_dict["id"],
+                job_dict.get("flow_id"),
+                job_dict["name"],
+                job_dict["status"],
+                job_dict.get("progress", 0.0),
+                job_dict.get("message", ""),
+                job_dict.get("input_rows", 0),
+                job_dict.get("output_rows", 0),
+                created_str,
+                job_dict.get("completed_at"),
+                job_dict.get("output_dataset_id"),
+                job_dict.get("output_file_path"),
+                logs_json_str,
+                job_dict.get("error")
+            ))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     @staticmethod
     def get_job(job_id: str) -> Optional[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM pipeline_jobs WHERE id = ?", (job_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_pipeline_jobs WHERE id = :id"), {"id": job_id})
+                    row = res.fetchone()
+                    if row:
+                        d = _format_row(dict(row._mapping))
+                        d["logs"] = json.loads(d["logs_json"]) if isinstance(d.get("logs_json"), str) else (d.get("logs_json") or [])
+                        d.pop("logs_json", None)
+                        return d
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pipeline_jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return None
+            d = dict(row)
+            d["logs"] = json.loads(d["logs_json"]) if isinstance(d.get("logs_json"), str) else (d.get("logs_json") or [])
+            d.pop("logs_json", None)
+            return d
+        except Exception:
             return None
-        d = dict(row)
-        d["logs"] = json.loads(d["logs_json"])
-        del d["logs_json"]
-        return d
 
     @staticmethod
     def list_jobs(limit: int = 50, flow_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if flow_id:
-            cursor.execute("SELECT * FROM pipeline_jobs WHERE flow_id = ? ORDER BY created_at DESC LIMIT ?", (flow_id, limit))
-        else:
-            cursor.execute("SELECT * FROM pipeline_jobs ORDER BY created_at DESC LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["logs"] = json.loads(d["logs_json"])
-            del d["logs_json"]
-            results.append(d)
-        return results
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    if flow_id:
+                        res = mconn.execute(text("SELECT * FROM dataflow_pipeline_jobs WHERE flow_id = :fid ORDER BY created_at DESC LIMIT :lim"), {"fid": flow_id, "lim": limit})
+                    else:
+                        res = mconn.execute(text("SELECT * FROM dataflow_pipeline_jobs ORDER BY created_at DESC LIMIT :lim"), {"lim": limit})
+                    rows = res.fetchall()
+                    results = []
+                    for r in rows:
+                        d = _format_row(dict(r._mapping))
+                        d["logs"] = json.loads(d["logs_json"]) if isinstance(d.get("logs_json"), str) else (d.get("logs_json") or [])
+                        d.pop("logs_json", None)
+                        results.append(d)
+                    return results
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if flow_id:
+                cursor.execute("SELECT * FROM pipeline_jobs WHERE flow_id = ? ORDER BY created_at DESC LIMIT ?", (flow_id, limit))
+            else:
+                cursor.execute("SELECT * FROM pipeline_jobs ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["logs"] = json.loads(d["logs_json"]) if isinstance(d.get("logs_json"), str) else (d.get("logs_json") or [])
+                d.pop("logs_json", None)
+                results.append(d)
+            return results
+        except Exception:
+            return []
 
     @staticmethod
     def list_audit_logs(limit: int = 100) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["details"] = json.loads(d["details_json"]) if d.get("details_json") else None
-            del d["details_json"]
-            results.append(d)
-        return results
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_audit_logs ORDER BY created_at DESC LIMIT :lim"), {"lim": limit})
+                    rows = res.fetchall()
+                    results = []
+                    for r in rows:
+                        d = _format_row(dict(r._mapping))
+                        d["details"] = json.loads(d["details_json"]) if isinstance(d.get("details_json"), str) else d.get("details_json")
+                        d.pop("details_json", None)
+                        results.append(d)
+                    return results
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["details"] = json.loads(d["details_json"]) if d.get("details_json") else None
+                d.pop("details_json", None)
+                results.append(d)
+            return results
+        except Exception:
+            return []
 
     @staticmethod
     def list_ingestion_history(limit: int = 50) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM ingestion_history ORDER BY created_at DESC LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_ingestion_history ORDER BY created_at DESC LIMIT :lim"), {"lim": limit})
+                    rows = res.fetchall()
+                    return [_format_row(dict(r._mapping)) for r in rows]
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM ingestion_history ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
 
     @staticmethod
     def list_transformation_history(limit: int = 50) -> List[Dict[str, Any]]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM transformation_history ORDER BY created_at DESC LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["rules"] = json.loads(d["rules_json"]) if d.get("rules_json") else []
-            del d["rules_json"]
-            results.append(d)
-        return results
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(text("SELECT * FROM dataflow_transformation_history ORDER BY created_at DESC LIMIT :lim"), {"lim": limit})
+                    rows = res.fetchall()
+                    results = []
+                    for r in rows:
+                        d = _format_row(dict(r._mapping))
+                        d["rules"] = json.loads(d["rules_json"]) if isinstance(d.get("rules_json"), str) else (d.get("rules_json") or [])
+                        d.pop("rules_json", None)
+                        results.append(d)
+                    return results
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM transformation_history ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d["rules"] = json.loads(d["rules_json"]) if d.get("rules_json") else []
+                d.pop("rules_json", None)
+                results.append(d)
+            return results
+        except Exception:
+            return []
 
     @staticmethod
     def get_metadata_summary() -> Dict[str, Any]:
-        init_db()
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    f_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_flows")).scalar() or 0
+                    s_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_staged_datasets")).scalar() or 0
+                    j_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_pipeline_jobs")).scalar() or 0
+                    a_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_audit_logs")).scalar() or 0
+                    i_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_ingestion_history")).scalar() or 0
+                    t_cnt = mconn.execute(text("SELECT COUNT(*) FROM dataflow_transformation_history")).scalar() or 0
+                    return {
+                        "metadata_storage_engine": "MySQL Active",
+                        "mysql_database": settings.MYSQL_DATABASE,
+                        "flows_count": f_cnt,
+                        "staged_datasets_count": s_cnt,
+                        "pipeline_jobs_count": j_cnt,
+                        "audit_logs_count": a_cnt,
+                        "ingestion_events_count": i_cnt,
+                        "transformation_events_count": t_cnt,
+                    }
+            except Exception:
+                pass
 
-        cursor.execute("SELECT COUNT(*) FROM flows")
-        flows_count = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM staged_datasets")
-        staged_count = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM pipeline_jobs")
-        jobs_count = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM audit_logs")
-        audit_count = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM ingestion_history")
-        ingestion_count = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM transformation_history")
-        transform_count = cursor.fetchone()[0]
-
-        conn.close()
-
-        db_type, _ = get_db_connection()
-        return {
-            "metadata_storage_engine": "MySQL Active" if db_type == "mysql" else "SQLite Catalog (Local Fallback)",
-            "mysql_database": settings.MYSQL_DATABASE,
-            "flows_count": flows_count,
-            "staged_datasets_count": staged_count,
-            "pipeline_jobs_count": jobs_count,
-            "audit_logs_count": audit_count,
-            "ingestion_events_count": ingestion_count,
-            "transformation_events_count": transform_count,
-        }
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM flows")
+            flows_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM staged_datasets")
+            staged_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM pipeline_jobs")
+            jobs_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM audit_logs")
+            audit_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ingestion_history")
+            ingestion_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM transformation_history")
+            transform_count = cursor.fetchone()[0]
+            conn.close()
+            return {
+                "metadata_storage_engine": "SQLite Catalog (Local Fallback)",
+                "mysql_database": settings.MYSQL_DATABASE,
+                "flows_count": flows_count,
+                "staged_datasets_count": staged_count,
+                "pipeline_jobs_count": jobs_count,
+                "audit_logs_count": audit_count,
+                "ingestion_events_count": ingestion_count,
+                "transformation_events_count": transform_count,
+            }
+        except Exception:
+            return {
+                "metadata_storage_engine": "Unknown",
+                "mysql_database": settings.MYSQL_DATABASE,
+                "flows_count": 0,
+                "staged_datasets_count": 0,
+                "pipeline_jobs_count": 0,
+                "audit_logs_count": 0,
+                "ingestion_events_count": 0,
+                "transformation_events_count": 0,
+            }
 
     @staticmethod
     def clear_all_metadata():
         """Completely purges all historical metadata, flows, staging sets, and audit records."""
-        settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM flows")
-        cursor.execute("DELETE FROM staged_datasets")
-        cursor.execute("DELETE FROM pipeline_jobs")
-        cursor.execute("DELETE FROM audit_logs")
-        cursor.execute("DELETE FROM ingestion_history")
-        cursor.execute("DELETE FROM transformation_history")
-        conn.commit()
-        conn.close()
-
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
             try:
@@ -974,3 +1201,18 @@ class CatalogDB:
                     mconn.commit()
             except Exception:
                 pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM flows")
+            cursor.execute("DELETE FROM staged_datasets")
+            cursor.execute("DELETE FROM pipeline_jobs")
+            cursor.execute("DELETE FROM audit_logs")
+            cursor.execute("DELETE FROM ingestion_history")
+            cursor.execute("DELETE FROM transformation_history")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
