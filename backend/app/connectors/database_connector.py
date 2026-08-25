@@ -12,12 +12,17 @@ class DatabaseConnector(BaseConnector):
         self.config = config
 
     def _get_connect_args(self) -> dict:
+        host = (self.config.host or "").lower()
         if self.config.db_type == DatabaseType.MYSQL:
-            return {"connect_timeout": 6}
+            args = {"connect_timeout": 15}
+            # Enable SSL automatically for cloud-hosted MySQL instances (Azure, AWS RDS, PlanetScale, Aiven, etc.)
+            if any(cloud_domain in host for cloud_domain in [".azure.com", ".amazonaws.com", ".psdb.cloud", ".aivencloud.com", ".digitalocean.com"]):
+                args["ssl"] = {"ssl_disabled": False}
+            return args
         elif self.config.db_type == DatabaseType.POSTGRES:
-            return {"timeout": 6}
+            return {"timeout": 15}
         elif self.config.db_type == DatabaseType.SQLITE:
-            return {"timeout": 6}
+            return {"timeout": 15}
         return {}
 
     def _get_connection_url(self) -> str:

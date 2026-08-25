@@ -68,6 +68,8 @@ class DataStoreEngine:
                             return pd.read_sql(text(f"SELECT * FROM `{custom_table}`"), con=conn)
                     except Exception:
                         pass
+                if "doesn't exist" in str(e).lower() or "1146" in str(e):
+                    raise FileNotFoundError(f"Staged dataset table '{table_name}' does not exist in MySQL. Please re-stage this dataset.")
                 raise RuntimeError(f"Failed to read MySQL staging table '{table_name}': {e}")
 
         # 2. SQLite Table Loading
@@ -80,13 +82,15 @@ class DataStoreEngine:
                 return df
             except Exception as e:
                 conn.close()
+                if "no such table" in str(e).lower():
+                    raise FileNotFoundError(f"Staged dataset table '{table_name}' does not exist in catalog database.")
                 raise RuntimeError(f"Failed to read SQLite staging table '{table_name}': {e}")
 
         # 3. Legacy Parquet disk fallback (if existing from previous sessions)
-        if Path(storage_path).exists():
+        if storage_path and Path(storage_path).exists():
             return pd.read_parquet(storage_path)
 
-        raise RuntimeError(f"Staged data source for '{meta['name']}' not found in database or storage.")
+        raise FileNotFoundError(f"Staged data source for '{meta.get('name', 'dataset')}' not found in database.")
 
     @staticmethod
     def get_staged_preview_slice(
@@ -139,32 +143,40 @@ class DataStoreEngine:
                         rows.append(cleaned)
 
                     return rows, total_rows, columns
-            except Exception:
+            except Exception as e:
+                # If table does not exist in MySQL, return empty preview with known schema columns
+                if "doesn't exist" in str(e).lower() or "1146" in str(e):
+                    cols = [c["name"] if isinstance(c, dict) else getattr(c, "name", str(c)) for c in meta.get("columns", [])]
+                    return [], 0, cols
                 pass
 
         # In-memory / Fallback path
-        df = DataStoreEngine.load_staged_dataframe(meta)
-        total_rows = len(df)
-        columns = list(df.columns)
-
-        if search and search.strip():
-            mask = df.astype(str).apply(lambda row: row.str.contains(search, case=False).any(), axis=1)
-            df = df[mask]
+        try:
+            df = DataStoreEngine.load_staged_dataframe(meta)
             total_rows = len(df)
+            columns = list(df.columns)
 
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        df_slice = df.iloc[start_idx:end_idx]
+            if search and search.strip():
+                mask = df.astype(str).apply(lambda row: row.str.contains(search, case=False).any(), axis=1)
+                df = df[mask]
+                total_rows = len(df)
 
-        rows = df_slice.to_dict(orient="records")
-        for r in rows:
-            for k, v in r.items():
-                if pd.isna(v):
-                    r[k] = None
-                elif hasattr(v, "isoformat"):
-                    r[k] = v.isoformat()
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            df_slice = df.iloc[start_idx:end_idx]
 
-        return rows, total_rows, columns
+            rows = df_slice.to_dict(orient="records")
+            for r in rows:
+                for k, v in r.items():
+                    if pd.isna(v):
+                        r[k] = None
+                    elif hasattr(v, "isoformat"):
+                        r[k] = v.isoformat()
+
+            return rows, total_rows, columns
+        except FileNotFoundError:
+            cols = [c["name"] if isinstance(c, dict) else getattr(c, "name", str(c)) for c in meta.get("columns", [])]
+            return [], 0, cols
 
     @staticmethod
     def drop_staged_table(dataset_id: str):

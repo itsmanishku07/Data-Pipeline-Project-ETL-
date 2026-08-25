@@ -10,9 +10,14 @@ def get_db_connection():
     """Attempts MySQL connection if enabled, otherwise returns SQLite connection."""
     if settings.USE_MYSQL_METADATA:
         try:
+            connect_args = {"connect_timeout": 15}
+            host = (settings.MYSQL_HOST or "").lower()
+            if any(cloud_domain in host for cloud_domain in [".azure.com", ".amazonaws.com", ".psdb.cloud", ".aivencloud.com", ".digitalocean.com"]):
+                connect_args["ssl"] = {"ssl_disabled": False}
+
             engine = create_engine(
                 settings.get_mysql_metadata_url(),
-                connect_args={"connect_timeout": 3},
+                connect_args=connect_args,
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
