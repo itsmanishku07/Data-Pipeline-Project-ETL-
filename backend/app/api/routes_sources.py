@@ -1,7 +1,13 @@
 import time
 import shutil
+from typing import List, Dict, Any, Optional
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from ..models.schemas import SourceConnectionRequest, SchemaInspectionResult
+from ..connectors import get_connector
+from ..engine.schema_engine import profile_dataframe
+from ..config import settings
+from ..models.db_models import CatalogDB
 
 router = APIRouter(prefix="/sources", tags=["Data Sources"])
 
