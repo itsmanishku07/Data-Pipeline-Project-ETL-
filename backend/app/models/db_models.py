@@ -6,11 +6,22 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, text
 from ..config import settings
 
+_GLOBAL_MYSQL_ENGINE = None
+
 def get_db_connection():
-    """Attempts MySQL connection if enabled, otherwise returns SQLite connection."""
+    """Returns pooled MySQL engine singleton if enabled, otherwise returns SQLite connection."""
+    global _GLOBAL_MYSQL_ENGINE
     if settings.USE_MYSQL_METADATA:
+        if _GLOBAL_MYSQL_ENGINE is not None:
+            return "mysql", _GLOBAL_MYSQL_ENGINE
+
         try:
-            connect_args = {"connect_timeout": 15}
+            connect_args = {
+                "connect_timeout": 10,
+                "read_timeout": 20,
+                "write_timeout": 20,
+                "charset": "utf8mb4"
+            }
             host = (settings.MYSQL_HOST or "").lower()
             if any(cloud_domain in host for cloud_domain in [".azure.com", ".amazonaws.com", ".psdb.cloud", ".aivencloud.com", ".digitalocean.com"]):
                 connect_args["ssl"] = {"ssl_disabled": False}
@@ -18,11 +29,15 @@ def get_db_connection():
             engine = create_engine(
                 settings.get_mysql_metadata_url(),
                 connect_args=connect_args,
+                pool_size=5,
+                max_overflow=10,
+                pool_recycle=300,
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            return "mysql", engine
+            _GLOBAL_MYSQL_ENGINE = engine
+            return "mysql", _GLOBAL_MYSQL_ENGINE
         except Exception:
             pass
     

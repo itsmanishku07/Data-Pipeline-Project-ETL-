@@ -1,13 +1,7 @@
 import time
 import shutil
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from typing import List, Dict, Any, Optional
-from ..models.schemas import SourceConnectionRequest, SchemaInspectionResult
-from ..connectors import get_connector
-from ..engine.schema_engine import profile_dataframe
-from ..config import settings
-from ..models.db_models import CatalogDB
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 
 router = APIRouter(prefix="/sources", tags=["Data Sources"])
 
@@ -33,18 +27,21 @@ def delete_saved_connection(conn_id: str):
     return {"success": True, "message": "Connection deleted successfully."}
 
 @router.post("/test")
-def test_connection(request: SourceConnectionRequest):
+def test_connection(request: SourceConnectionRequest, background_tasks: BackgroundTasks):
     try:
         connector = get_connector(request)
         success, message = connector.test_connection()
-        CatalogDB.record_audit_log(
+        # Non-blocking background audit log recording
+        background_tasks.add_task(
+            CatalogDB.record_audit_log,
             event_type="CONNECTION_TEST",
             summary=f"Connection test for {request.name} ({request.source_type.value}): {'SUCCESS' if success else 'FAILED'}",
             details={"source_name": request.name, "success": success, "message": message}
         )
         return {"success": success, "message": message}
     except Exception as e:
-        CatalogDB.record_audit_log(
+        background_tasks.add_task(
+            CatalogDB.record_audit_log,
             event_type="CONNECTION_TEST_ERROR",
             summary=f"Connection test failed for {request.name}: {str(e)}"
         )
@@ -63,7 +60,7 @@ def list_database_tables(request: SourceConnectionRequest):
         raise HTTPException(status_code=400, detail=f"Failed to fetch database tables: {str(e)}")
 
 @router.post("/inspect", response_model=SchemaInspectionResult)
-def inspect_source(request: SourceConnectionRequest, limit: int = 100):
+def inspect_source(request: SourceConnectionRequest, background_tasks: BackgroundTasks, limit: int = 100):
     start_t = time.time()
     try:
         connector = get_connector(request)
@@ -81,9 +78,10 @@ def inspect_source(request: SourceConnectionRequest, limit: int = 100):
                 elif hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
 
-        # Record Ingestion History in MySQL Metadata store
+        # Non-blocking asynchronous record ingestion history
         db_cfg = request.database_config
-        CatalogDB.record_ingestion(
+        background_tasks.add_task(
+            CatalogDB.record_ingestion,
             source_name=request.name,
             source_type=request.source_type.value,
             host=db_cfg.host if db_cfg else None,
@@ -105,7 +103,8 @@ def inspect_source(request: SourceConnectionRequest, limit: int = 100):
         )
     except Exception as e:
         duration_ms = (time.time() - start_t) * 1000.0
-        CatalogDB.record_ingestion(
+        background_tasks.add_task(
+            CatalogDB.record_ingestion,
             source_name=request.name,
             source_type=request.source_type.value if hasattr(request.source_type, "value") else str(request.source_type),
             status="FAILED",
@@ -115,7 +114,7 @@ def inspect_source(request: SourceConnectionRequest, limit: int = 100):
         raise HTTPException(status_code=400, detail=f"Source inspection failed: {str(e)}")
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     try:
         import tempfile
         from pathlib import Path
@@ -125,7 +124,8 @@ async def upload_file(file: UploadFile = File(...)):
         with open(dest_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        CatalogDB.record_audit_log(
+        background_tasks.add_task(
+            CatalogDB.record_audit_log,
             event_type="FILE_UPLOADED",
             entity_id=file.filename,
             entity_type="FILE",

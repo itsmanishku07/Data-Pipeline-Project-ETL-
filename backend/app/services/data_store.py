@@ -30,15 +30,22 @@ class DataStoreEngine:
         db_type, engine = get_db_connection()
 
         if db_type == "mysql" and engine is not None:
-            # Save directly into MySQL table
-            df.to_sql(name=table_name, con=engine, if_exists="replace", index=False)
+            # High-speed bulk multi-row insert into MySQL table
+            df.to_sql(
+                name=table_name, 
+                con=engine, 
+                if_exists="replace", 
+                index=False,
+                chunksize=2000,
+                method="multi"
+            )
             storage_path = f"mysql://{settings.MYSQL_HOST}:{settings.MYSQL_PORT}/{settings.MYSQL_DATABASE}/{table_name}"
             return storage_path, "mysql_table", 0
         else:
             # Fallback to local SQLite table in catalog.db (zero parquet files)
             init_db()
             conn = sqlite3.connect(settings.CATALOG_DB_PATH)
-            df.to_sql(name=table_name, con=conn, if_exists="replace", index=False)
+            df.to_sql(name=table_name, con=conn, if_exists="replace", index=False, chunksize=2000, method="multi")
             conn.close()
             storage_path = f"sqlite://catalog.db/{table_name}"
             return storage_path, "sqlite_table", 0

@@ -17,7 +17,7 @@ from ..services.data_store import DataStoreEngine
 router = APIRouter(prefix="/transform", tags=["Transformation Studio"])
 
 @router.post("/preview", response_model=TransformPreviewResult)
-def preview_transformation(request: PreviewTransformRequest):
+def preview_transformation(request: PreviewTransformRequest, background_tasks: BackgroundTasks):
     meta = CatalogDB.get_staged_dataset(request.staging_dataset_id)
     if not meta:
         raise HTTPException(status_code=404, detail=f"Staged dataset {request.staging_dataset_id} not found.")
@@ -39,8 +39,9 @@ def preview_transformation(request: PreviewTransformRequest):
                 elif hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
 
-        # Record Transformation in MySQL Metadata store
-        CatalogDB.record_transformation(
+        # Non-blocking asynchronous recording of transformation in MySQL metadata
+        background_tasks.add_task(
+            CatalogDB.record_transformation,
             staging_dataset_id=request.staging_dataset_id,
             rule_count=len(request.rules),
             rules=request.rules,
