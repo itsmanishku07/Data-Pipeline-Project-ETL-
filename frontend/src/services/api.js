@@ -23,42 +23,80 @@ const api = axios.create({
   },
 });
 
+// Client-side In-Memory SWR Cache for Instant UI Navigation (0ms Latency)
+const memoryCache = new Map();
+const CACHE_TTL_MS = 25000; // 25s TTL
+
+const cachedGet = async (key, fetcher) => {
+  const now = Date.now();
+  const cached = memoryCache.get(key);
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+  const data = await fetcher();
+  memoryCache.set(key, { data, timestamp: now });
+  return data;
+};
+
+export const invalidateDataFlowCache = (prefix = null) => {
+  if (!prefix) {
+    memoryCache.clear();
+  } else {
+    for (const key of memoryCache.keys()) {
+      if (key.startsWith(prefix)) {
+        memoryCache.delete(key);
+      }
+    }
+  }
+};
+
 export const DataFlowAPI = {
   // Flows
   listFlows: async () => {
-    const res = await api.get('/flows');
-    return res.data;
+    return cachedGet('flows_list', async () => {
+      const res = await api.get('/flows');
+      return res.data;
+    });
   },
 
   createFlow: async (req) => {
     const res = await api.post('/flows', req);
+    invalidateDataFlowCache('flows');
     return res.data;
   },
 
   getFlow: async (id) => {
-    const res = await api.get(`/flows/${id}`);
-    return res.data;
+    return cachedGet(`flow_${id}`, async () => {
+      const res = await api.get(`/flows/${id}`);
+      return res.data;
+    });
   },
 
   deleteFlow: async (id) => {
     const res = await api.delete(`/flows/${id}`);
+    invalidateDataFlowCache('flows');
     return res.data;
   },
 
   // Sources & Saved Connections
   getSavedConnections: async (sourceType = null) => {
-    const url = sourceType ? `/sources/connections?source_type=${sourceType}` : '/sources/connections';
-    const res = await api.get(url);
-    return res.data;
+    const cacheKey = `conn_${sourceType || 'all'}`;
+    return cachedGet(cacheKey, async () => {
+      const url = sourceType ? `/sources/connections?source_type=${sourceType}` : '/sources/connections';
+      const res = await api.get(url);
+      return res.data;
+    });
   },
 
   saveConnection: async (connDict) => {
     const res = await api.post('/sources/connections', connDict);
+    invalidateDataFlowCache('conn');
     return res.data;
   },
 
   deleteSavedConnection: async (connId) => {
     const res = await api.delete(`/sources/connections/${connId}`);
+    invalidateDataFlowCache('conn');
     return res.data;
   },
 
@@ -88,8 +126,10 @@ export const DataFlowAPI = {
 
   // Schema & Types
   getSparkTypes: async () => {
-    const res = await api.get('/schema/spark-types');
-    return res.data;
+    return cachedGet('spark_types', async () => {
+      const res = await api.get('/schema/spark-types');
+      return res.data;
+    });
   },
 
   validateCast: async (sourceRequest, castRules) => {
@@ -103,18 +143,25 @@ export const DataFlowAPI = {
   // Staging
   stageDataset: async (req) => {
     const res = await api.post('/staging/stage', req);
+    invalidateDataFlowCache('staging');
+    invalidateDataFlowCache('history');
     return res.data;
   },
 
   listStagedDatasets: async (flowId = null) => {
-    const url = flowId ? `/staging/datasets?flow_id=${flowId}` : '/staging/datasets';
-    const res = await api.get(url);
-    return res.data;
+    const cacheKey = `staging_list_${flowId || 'all'}`;
+    return cachedGet(cacheKey, async () => {
+      const url = flowId ? `/staging/datasets?flow_id=${flowId}` : '/staging/datasets';
+      const res = await api.get(url);
+      return res.data;
+    });
   },
 
   getStagedDataset: async (id) => {
-    const res = await api.get(`/staging/datasets/${id}`);
-    return res.data;
+    return cachedGet(`staging_item_${id}`, async () => {
+      const res = await api.get(`/staging/datasets/${id}`);
+      return res.data;
+    });
   },
 
   getDatasetPreview: async (id, page = 1, pageSize = 50, search) => {
@@ -123,12 +170,18 @@ export const DataFlowAPI = {
       page_size: pageSize.toString(),
     });
     if (search) params.append('search', search);
-    const res = await api.get(`/staging/datasets/${id}/preview?${params.toString()}`);
-    return res.data;
+    const cacheKey = `preview_${id}_p${page}_s${pageSize}_q${search || ''}`;
+    return cachedGet(cacheKey, async () => {
+      const res = await api.get(`/staging/datasets/${id}/preview?${params.toString()}`);
+      return res.data;
+    });
   },
 
   deleteStagedDataset: async (id) => {
     const res = await api.delete(`/staging/datasets/${id}`);
+    invalidateDataFlowCache('staging');
+    invalidateDataFlowCache('preview');
+    invalidateDataFlowCache('history');
     return res.data;
   },
 
@@ -140,6 +193,9 @@ export const DataFlowAPI = {
 
   executePipeline: async (req) => {
     const res = await api.post('/transform/execute', req);
+    invalidateDataFlowCache('staging');
+    invalidateDataFlowCache('jobs');
+    invalidateDataFlowCache('history');
     return res.data;
   },
 
@@ -150,9 +206,12 @@ export const DataFlowAPI = {
 
   // Jobs
   listJobs: async (flowId = null) => {
-    const url = flowId ? `/jobs?flow_id=${flowId}` : '/jobs';
-    const res = await api.get(url);
-    return res.data;
+    const cacheKey = `jobs_list_${flowId || 'all'}`;
+    return cachedGet(cacheKey, async () => {
+      const url = flowId ? `/jobs?flow_id=${flowId}` : '/jobs';
+      const res = await api.get(url);
+      return res.data;
+    });
   },
 
   getJobStatus: async (jobId) => {
@@ -166,37 +225,49 @@ export const DataFlowAPI = {
 
   // Metadata & History
   getMetadataSummary: async () => {
-    const res = await api.get('/history/summary');
-    return res.data;
+    return cachedGet('history_summary', async () => {
+      const res = await api.get('/history/summary');
+      return res.data;
+    });
   },
 
   getAuditLogs: async (limit = 100) => {
-    const res = await api.get(`/history/audit-logs?limit=${limit}`);
-    return res.data;
+    return cachedGet(`audit_logs_${limit}`, async () => {
+      const res = await api.get(`/history/audit-logs?limit=${limit}`);
+      return res.data;
+    });
   },
 
   getIngestionHistory: async (limit = 50) => {
-    const res = await api.get(`/history/ingestions?limit=${limit}`);
-    return res.data;
+    return cachedGet(`ingest_history_${limit}`, async () => {
+      const res = await api.get(`/history/ingestions?limit=${limit}`);
+      return res.data;
+    });
   },
 
   getTransformationHistory: async (limit = 50) => {
-    const res = await api.get(`/history/transformations?limit=${limit}`);
-    return res.data;
+    return cachedGet(`transform_history_${limit}`, async () => {
+      const res = await api.get(`/history/transformations?limit=${limit}`);
+      return res.data;
+    });
   },
 
   clearAllHistory: async () => {
     const res = await api.post('/history/clear');
+    invalidateDataFlowCache(); // Clear everything
     return res.data;
   },
 
   getMetadataCredentials: async () => {
-    const res = await api.get('/history/credentials');
-    return res.data;
+    return cachedGet('creds_meta', async () => {
+      const res = await api.get('/history/credentials');
+      return res.data;
+    });
   },
 
   updateMetadataCredentials: async (creds) => {
     const res = await api.post('/history/credentials', creds);
+    invalidateDataFlowCache();
     return res.data;
   },
 };

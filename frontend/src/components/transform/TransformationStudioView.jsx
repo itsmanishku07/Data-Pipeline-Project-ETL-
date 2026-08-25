@@ -252,22 +252,22 @@ export const TransformationStudioView = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
           <button
             type="button"
             onClick={handlePreview}
             disabled={previewLoading || rules.length === 0}
-            className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
+            className="flex-1 sm:flex-initial justify-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
           >
             <Play className={`w-3.5 h-3.5 ${previewLoading ? 'animate-spin' : ''}`} />
-            <span>{previewLoading ? 'Executing Spark...' : 'Live Preview'}</span>
+            <span>{previewLoading ? 'Executing...' : 'Live Preview'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => onProceedToExecution(activeDataset, rules.filter((r) => r.enabled))}
             disabled={rules.length === 0}
-            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
+            className="flex-1 sm:flex-initial justify-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
           >
             <span>Proceed to Run DAG</span>
             <ArrowRight className="w-3.5 h-3.5" />

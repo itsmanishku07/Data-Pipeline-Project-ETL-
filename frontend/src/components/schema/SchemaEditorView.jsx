@@ -206,14 +206,14 @@ export const SchemaEditorView = ({
       />
 
       {/* Stage Action Box */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 transition-colors">
-        <div className="flex items-center space-x-3 w-full sm:w-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 transition-colors">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 w-full sm:w-auto">
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-400 shrink-0">Staged Name:</label>
           <input
             type="text"
             value={stagingName}
             onChange={(e) => setStagingName(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500 w-64"
+            className="px-3 py-2 sm:py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500 w-full sm:w-64"
           />
         </div>
 
@@ -221,7 +221,7 @@ export const SchemaEditorView = ({
           <button
             type="button"
             onClick={onBack}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold"
+            className="flex-1 sm:flex-initial text-center px-3.5 py-2 sm:py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors"
           >
             Back
           </button>
@@ -230,7 +230,7 @@ export const SchemaEditorView = ({
             type="button"
             onClick={handleStageDataset}
             disabled={stagingLoading || !stagingName.trim()}
-            className="px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
+            className="flex-1 sm:flex-initial justify-center px-5 py-2 sm:py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
           >
             <Layers className="w-3.5 h-3.5" />
             <span>{stagingLoading ? 'Staging...' : 'Stage Dataset'}</span>

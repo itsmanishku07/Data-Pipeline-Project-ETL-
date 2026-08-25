@@ -136,23 +136,23 @@ export const HistoryAuditView = () => {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             <button
               type="button"
               onClick={handleClearAllHistory}
               disabled={loading}
-              className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1.5 transition-colors"
+              className="flex-1 sm:flex-initial justify-center px-3 py-2 sm:py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1.5 transition-colors"
               title="Clear all staged datasets, jobs, and audit logs"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear All History</span>
+              <span>Clear History</span>
             </button>
 
             <button
               type="button"
               onClick={fetchAllData}
               disabled={loading}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
+              className="flex-1 sm:flex-initial justify-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
@@ -195,8 +195,8 @@ export const HistoryAuditView = () => {
       </div>
 
       {/* Sub-Tab Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-auto overflow-x-auto whitespace-nowrap -webkit-overflow-scrolling-touch">
           <button
             type="button"
             onClick={() => setActiveTab('audit')}
@@ -218,7 +218,7 @@ export const HistoryAuditView = () => {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Ingestion Events ({ingestionLogs.length})
+            Ingestions ({ingestionLogs.length})
           </button>
 
           <button
@@ -230,7 +230,7 @@ export const HistoryAuditView = () => {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Transformation History ({transformLogs.length})
+            Transformations ({transformLogs.length})
           </button>
 
           <button
@@ -242,7 +242,7 @@ export const HistoryAuditView = () => {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            MySQL Credentials
+            MySQL Database Store
           </button>
         </div>
 

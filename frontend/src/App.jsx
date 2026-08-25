@@ -8,10 +8,28 @@ import { TransformationStudioView } from './components/transform/TransformationS
 import { PipelineExecutionView } from './components/pipeline/PipelineExecutionView';
 import { HistoryAuditView } from './components/history/HistoryAuditView';
 import { DataFlowAPI } from './services/api';
+import { 
+  Database, 
+  Sparkles, 
+  Layers, 
+  Sliders, 
+  PlayCircle, 
+  History 
+} from 'lucide-react';
+
+const mobileNavItems = [
+  { id: 1, label: 'Sources', icon: Database },
+  { id: 2, label: 'Schema', icon: Sparkles },
+  { id: 3, label: 'Staging', icon: Layers },
+  { id: 4, label: 'Transform', icon: Sliders },
+  { id: 5, label: 'Pipeline', icon: PlayCircle },
+  { id: 6, label: 'History', icon: History },
+];
 
 export const App = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [maxStepReached, setMaxStepReached] = useState(6);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Flows state
   const [flows, setFlows] = useState([]);
@@ -116,8 +134,8 @@ export const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans transition-colors duration-200 antialiased">
-      {/* Left Modern Sidebar */}
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans transition-colors duration-200 antialiased overflow-x-hidden">
+      {/* Left Modern Sidebar (Desktop + Mobile Sliding Drawer) */}
       <Sidebar
         currentStep={currentStep}
         onStepClick={goToStep}
@@ -125,9 +143,11 @@ export const App = () => {
         isDark={isDark}
         onToggleTheme={toggleTheme}
         stagedCount={allStagedDatasets.length}
+        isOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
       />
 
-      {/* Main Workspace Area (Clean, No Footer) */}
+      {/* Main Workspace Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         <TopHeader 
           currentStep={currentStep} 
@@ -135,9 +155,10 @@ export const App = () => {
           activeFlowId={activeFlowId}
           onSelectFlow={handleFlowSelect}
           activeDatasetName={activeStagedDataset?.name} 
+          onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
 
-        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6">
+        <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 pb-20 md:pb-6">
           {currentStep === 1 && (
             <SourceConnectorView onSourceInspected={handleSourceInspected} />
           )}
@@ -188,6 +209,36 @@ export const App = () => {
           )}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (Ultra Fast 1-Tap Mobile Switching) */}
+      <nav className="fixed bottom-0 inset-x-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 z-30 md:hidden flex items-center justify-around py-1.5 px-2 safe-area-pb shadow-lg">
+        {mobileNavItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = currentStep === item.id;
+          const isAccessible = item.id <= Math.max(currentStep, maxStepReached) || item.id === 6;
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => isAccessible && goToStep(item.id)}
+              disabled={!isAccessible}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-lg transition-all ${
+                isActive
+                  ? 'text-sky-600 dark:text-sky-400 font-bold'
+                  : isAccessible
+                  ? 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  : 'text-slate-300 dark:text-slate-700 opacity-40 cursor-not-allowed'
+              }`}
+            >
+              <div className={`p-1 rounded-md ${isActive ? 'bg-sky-50 dark:bg-sky-500/10' : ''}`}>
+                <Icon className="w-4 h-4" />
+              </div>
+              <span className="text-[10px] leading-none mt-0.5 tracking-tight">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 };

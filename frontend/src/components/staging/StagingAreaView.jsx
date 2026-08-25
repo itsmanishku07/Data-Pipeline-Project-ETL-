@@ -110,32 +110,30 @@ export const StagingAreaView = ({
   if (!activeDataset) {
     return (
       <div className="space-y-6 animate-fadeIn">
-        {/* Gallery Top Banner */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {/* Top Header & Search Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30">
-              <HardDrive className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30 shrink-0">
+              <Layers className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Lakehouse Staged Stages & Datasets ({datasets.length})
-              </h3>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Lakehouse Staging Repository</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Click on any saved stage to inspect its data preview, schema profiles, and lineage.
+                {datasets.length} persistent staging dataset{datasets.length === 1 ? '' : 's'} in Lakehouse
               </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:space-x-2.5">
             {datasets.length > 0 && (
-              <div className="relative">
+              <div className="relative w-full sm:w-auto">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Search stages..."
                   value={searchStage}
                   onChange={(e) => setSearchStage(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-48 font-sans"
+                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-full sm:w-48 font-sans"
                 />
               </div>
             )}
@@ -143,7 +141,7 @@ export const StagingAreaView = ({
             <button
               type="button"
               onClick={onAddNewSource}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all shrink-0"
+              className="w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Connect & Stage Source</span>
@@ -258,11 +256,11 @@ export const StagingAreaView = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
           <button
             type="button"
             onClick={(e) => handleDeleteStage(activeDataset.id, e)}
-            className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1 transition-colors"
+            className="flex-1 sm:flex-initial justify-center px-3 py-2 sm:py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Delete Stage</span>
@@ -271,17 +269,17 @@ export const StagingAreaView = ({
           <button
             type="button"
             onClick={() => onSelectDatasetForTransform(activeDataset)}
-            className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all"
+            className="flex-1 sm:flex-initial justify-center px-4 py-2 sm:py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all"
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Transform This Stage</span>
+            <span>Transform Stage</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
       {/* Sub-Tabs: Data Preview, Schema & Types, Lineage Metadata */}
-      <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-fit">
+      <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-fit overflow-x-auto whitespace-nowrap -webkit-overflow-scrolling-touch">
         <button
           type="button"
           onClick={() => setActiveTab('preview')}
