@@ -17,35 +17,35 @@ const navItems = [
     label: 'Data Sources', 
     description: 'Connect & Ingest',
     icon: Database,
-    badge: 'Step 1'
+    badge: 'Ingest'
   },
   { 
     id: 2, 
     label: 'Schema Casting', 
     description: 'Spark Types & Profiling',
     icon: Sparkles,
-    badge: 'Step 2'
+    badge: 'Schema'
   },
   { 
     id: 3, 
     label: 'Staging Area', 
     description: 'Lakehouse Staged Sets',
     icon: Layers,
-    badge: 'Step 3'
+    badge: 'Staging'
   },
   { 
     id: 4, 
     label: 'Transform Studio', 
     description: 'Filters, SQL & Math Rules',
     icon: Sliders,
-    badge: 'Step 4'
+    badge: 'Studio'
   },
   { 
     id: 5, 
     label: 'Pipeline Runner', 
     description: 'Job DAG & File Exports',
     icon: PlayCircle,
-    badge: 'Step 5'
+    badge: 'Runner'
   },
   { 
     id: 6, 

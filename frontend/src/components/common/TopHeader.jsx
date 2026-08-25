@@ -36,10 +36,6 @@ export const TopHeader = ({
 
         <div className="min-w-0">
           <div className="flex items-center space-x-1.5 sm:space-x-2">
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 font-semibold uppercase tracking-wider shrink-0">
-              Step {currentStep}
-            </span>
-            <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
             <h2 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
               {info.title}
             </h2>

@@ -155,7 +155,7 @@ export const StagingAreaView = ({
             <FolderOpen className="w-10 h-10 text-slate-400 mx-auto mb-1" />
             <h3 className="text-sm font-bold text-slate-800 dark:text-white">No Staged Datasets Yet</h3>
             <p className="max-w-sm mx-auto text-slate-400">
-              Connect a source in Step 1, apply schema casting in Step 2, and stage it into the Lakehouse.
+              Connect a data source, customize schema types, and stage it into the Lakehouse.
             </p>
             <button
               type="button"

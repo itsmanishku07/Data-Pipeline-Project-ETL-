@@ -105,14 +105,14 @@ export const App = () => {
     setMaxStepReached((prev) => Math.max(prev, step));
   };
 
-  // Step 1 -> Step 2 Handlers
+  // Sources -> Schema Handlers
   const handleSourceInspected = (req, result) => {
     setSourceRequest(req);
     setInspectionResult(result);
     goToStep(2);
   };
 
-  // Step 2 -> Step 3 Handlers
+  // Schema -> Staging Handlers
   const handleDatasetStaged = (stagedInfo) => {
     setActiveStagedDataset(stagedInfo);
     setAllStagedDatasets((prev) => [stagedInfo, ...prev.filter((d) => d.id !== stagedInfo.id)]);
@@ -120,13 +120,13 @@ export const App = () => {
     goToStep(3);
   };
 
-  // Step 3 -> Step 4 Handlers
+  // Staging -> Transform Handlers
   const handleSelectDatasetForTransform = (dataset) => {
     setActiveStagedDataset(dataset);
     goToStep(4);
   };
 
-  // Step 4 -> Step 5 Handlers
+  // Transform -> Pipeline Execution Handlers
   const handleProceedToExecution = (dataset, rules) => {
     setActiveStagedDataset(dataset);
     setActiveRules(rules);

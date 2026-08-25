@@ -161,7 +161,7 @@ export const TransformationStudioView = ({
             <FolderOpen className="w-10 h-10 text-slate-400 mx-auto mb-1" />
             <h3 className="text-sm font-bold text-slate-800 dark:text-white">No Staged Sets Found</h3>
             <p className="max-w-sm mx-auto text-slate-400">
-              You haven't staged any data yet. Please connect a data source in Step 1 and stage it in Step 2/3.
+              You haven't staged any data yet. Please connect a data source and stage it in the Staging Area.
             </p>
             <button
               type="button"
