@@ -113,7 +113,7 @@ export const CreateFlowModal = ({ isOpen, onClose, onFlowCreated }) => {
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+              className="h-9 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center justify-center transition-colors"
             >
               Cancel
             </button>
@@ -121,7 +121,7 @@ export const CreateFlowModal = ({ isOpen, onClose, onFlowCreated }) => {
             <button
               type="submit"
               disabled={loading || !name.trim()}
-              className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
+              className="h-9 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center justify-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{loading ? 'Creating...' : 'Create Flow'}</span>

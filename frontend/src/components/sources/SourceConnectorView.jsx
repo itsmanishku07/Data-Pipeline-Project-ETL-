@@ -429,7 +429,7 @@ export const SourceConnectorView = ({
             <input
               type="text"
               required
-              placeholder="e.g., E-Commerce Daily Pipeline, Finance Reconciliation"
+              placeholder=""
               value={newFlowName}
               onChange={(e) => setNewFlowName(e.target.value)}
               className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
@@ -455,7 +455,7 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description (Optional)</label>
               <input
                 type="text"
-                placeholder="Brief description..."
+                placeholder=""
                 value={newFlowDesc}
                 onChange={(e) => setNewFlowDesc(e.target.value)}
                 className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
@@ -565,7 +565,7 @@ export const SourceConnectorView = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g., Daily Revenue Analytics"
+                  placeholder=""
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
@@ -592,7 +592,7 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description</label>
                 <textarea
                   rows={2}
-                  placeholder="Brief description of this pipeline workflow..."
+                  placeholder=""
                   value={newFlowDesc}
                   onChange={(e) => setNewFlowDesc(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
