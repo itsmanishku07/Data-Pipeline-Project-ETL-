@@ -4,11 +4,6 @@ import pandas as pd
 from .base import BaseConnector
 from ..models.schemas import AzureLakehouseConfig, FileFormat
 from ..config import settings
-from .sample_datasets import (
-    generate_ecommerce_orders,
-    generate_customer_profiles,
-    generate_iot_telemetry
-)
 
 class AzureLakehouseConnector(BaseConnector):
     def __init__(self, config: AzureLakehouseConfig):
@@ -63,18 +58,7 @@ class AzureLakehouseConnector(BaseConnector):
             except Exception as e:
                 raise RuntimeError(f"Error fetching from Azure Lakehouse: {str(e)}")
 
-        # In-memory extraction (zero disk storage files)
-        path = (self.config.path or "").lower()
-        if "customer" in path:
-            df = generate_customer_profiles()
-        elif "order" in path or "sale" in path:
-            df = generate_ecommerce_orders()
-        else:
-            df = generate_iot_telemetry()
-
-        if limit and len(df) > limit:
-            df = df.head(limit)
-        return df
+        raise ValueError("Azure Storage Account Key, SAS Token, or Connection String is required to read from live Azure Lakehouse.")
 
     def get_source_summary(self) -> str:
         return f"Azure Lakehouse: abfss://{self.config.container_name}@{self.config.account_name}.dfs.core.windows.net/{self.config.path}"

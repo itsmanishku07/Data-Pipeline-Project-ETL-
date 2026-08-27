@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
+  GitBranch,
+  Plus,
+  X,
   Database, 
   Cloud, 
   Layers, 
@@ -30,9 +33,54 @@ const sourceEngines = [
   { id: 'upload', name: 'Upload File', icon: Upload },
 ];
 
-export const SourceConnectorView = ({ onSourceInspected }) => {
+export const SourceConnectorView = ({ 
+  flows = [],
+  activeFlowId,
+  onSelectFlow,
+  onRefreshFlows,
+  onSourceInspected,
+  onNavigateToStep
+}) => {
   const [activeSource, setActiveSource] = useState('mysql');
-  const [connectionName, setConnectionName] = useState('My MySQL Database');
+  const [connectionName, setConnectionName] = useState('MySQL Database');
+
+  // Inline Flow Creation State
+  const [showCreateFlowModal, setShowCreateFlowModal] = useState(false);
+  const [newFlowName, setNewFlowName] = useState('');
+  const [newFlowCategory, setNewFlowCategory] = useState('General');
+  const [newFlowDesc, setNewFlowDesc] = useState('');
+  const [creatingFlow, setCreatingFlow] = useState(false);
+  const [flowCreateError, setFlowCreateError] = useState(null);
+
+  const currentFlow = flows.find((f) => f.id === activeFlowId) || (flows.length > 0 ? flows[0] : null);
+
+  const handleCreateFlowSubmit = async (e) => {
+    e.preventDefault();
+    if (!newFlowName.trim()) {
+      setFlowCreateError('Please provide a valid Flow name.');
+      return;
+    }
+    setCreatingFlow(true);
+    setFlowCreateError(null);
+    try {
+      const created = await DataFlowAPI.createFlow({
+        name: newFlowName.trim(),
+        category: newFlowCategory.trim() || 'General',
+        description: newFlowDesc.trim(),
+        rules: []
+      });
+      setShowCreateFlowModal(false);
+      setNewFlowName('');
+      setNewFlowDesc('');
+      setNewFlowCategory('General');
+      if (onRefreshFlows) await onRefreshFlows();
+      if (onSelectFlow) onSelectFlow(created.id);
+    } catch (err) {
+      setFlowCreateError(err?.response?.data?.detail || err.message || 'Failed to create flow');
+    } finally {
+      setCreatingFlow(false);
+    }
+  };
 
   // Database Connection Fields
   const [host, setHost] = useState('localhost');
@@ -75,6 +123,26 @@ export const SourceConnectorView = ({ onSourceInspected }) => {
   const [inspecting, setInspecting] = useState(false);
   const [error, setError] = useState(null);
 
+  // Connected Flow Datasets State
+  const [flowDatasets, setFlowDatasets] = useState([]);
+  const [loadingFlowDatasets, setLoadingFlowDatasets] = useState(false);
+
+  const fetchFlowDatasets = async () => {
+    if (!activeFlowId) {
+      setFlowDatasets([]);
+      return;
+    }
+    setLoadingFlowDatasets(true);
+    try {
+      const datasets = await DataFlowAPI.listStagedDatasets(activeFlowId);
+      setFlowDatasets(datasets || []);
+    } catch (err) {
+      console.error('Failed to load datasets for flow', err);
+    } finally {
+      setLoadingFlowDatasets(false);
+    }
+  };
+
   const fetchSavedConnections = async () => {
     setLoadingSaved(true);
     try {
@@ -90,6 +158,10 @@ export const SourceConnectorView = ({ onSourceInspected }) => {
   useEffect(() => {
     fetchSavedConnections();
   }, []);
+
+  useEffect(() => {
+    fetchFlowDatasets();
+  }, [activeFlowId]);
 
   const handleSourceSelect = (srcId) => {
     setActiveSource(srcId);
@@ -329,8 +401,351 @@ export const SourceConnectorView = ({ onSourceInspected }) => {
     return tbl.toLowerCase().includes(tableSearchTerm.toLowerCase());
   });
 
+  if (flows.length === 0 || !activeFlowId) {
+    return (
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 sm:p-12 text-center max-w-xl mx-auto space-y-5 shadow-sm animate-fadeIn my-6">
+        <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto border border-indigo-200 dark:border-indigo-500/20">
+          <GitBranch className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+            Create a Data Flow First
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+            Every data source, schema, staging table, and transformation belongs to an isolated Data Flow. Please create your Flow to begin ingesting sources.
+          </p>
+        </div>
+
+        {flowCreateError && (
+          <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{flowCreateError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleCreateFlowSubmit} className="space-y-3 text-left p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Flow Name *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g., E-Commerce Daily Pipeline, Finance Reconciliation"
+              value={newFlowName}
+              onChange={(e) => setNewFlowName(e.target.value)}
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
+              <select
+                value={newFlowCategory}
+                onChange={(e) => setNewFlowCategory(e.target.value)}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+              >
+                <option value="General">General</option>
+                <option value="Finance">Finance</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Analytics">Analytics</option>
+                <option value="Sales">Sales</option>
+                <option value="Operations">Operations</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description (Optional)</label>
+              <input
+                type="text"
+                placeholder="Brief description..."
+                value={newFlowDesc}
+                onChange={(e) => setNewFlowDesc(e.target.value)}
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={creatingFlow}
+            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-sm transition-all disabled:opacity-50 mt-2"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{creatingFlow ? 'Creating Flow...' : 'Create Flow & Select Data Source'}</span>
+          </button>
+        </form>
+
+        {flows.length > 0 && (
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center space-x-2 text-xs">
+            <span className="text-slate-400">Or select an existing flow:</span>
+            <select
+              onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
+              className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-800 dark:text-slate-200"
+            >
+              <option value="">Choose Flow...</option>
+              {flows.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 animate-fadeIn">
+      {/* ACTIVE FLOW TARGET BANNER */}
+      <div className="bg-gradient-to-r from-indigo-900/40 via-slate-900 to-indigo-950/30 border border-indigo-500/30 rounded-xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0 mt-0.5 sm:mt-0">
+            <GitBranch className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-mono uppercase font-bold text-indigo-400">Target Flow:</span>
+              <strong className="text-xs sm:text-sm font-bold text-white truncate max-w-[140px] sm:max-w-none">{currentFlow?.name || 'Active Flow'}</strong>
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 uppercase font-bold shrink-0">
+                {currentFlow?.category || 'General'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+              All tables and ingested data will be scoped exclusively to this Flow.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2 w-full sm:w-auto mt-1 sm:mt-0">
+          <select
+            value={activeFlowId || ''}
+            onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
+            className="flex-1 sm:flex-none px-2.5 py-1.5 bg-slate-800 text-xs font-mono font-bold text-white rounded-lg border border-slate-700 focus:outline-none min-w-0 truncate"
+          >
+            {flows.map((f) => (
+              <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setShowCreateFlowModal(true)}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1 transition-colors"
+            title="Create New Flow"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">New Flow</span>
+          </button>
+        </div>
+      </div>
+
+      {/* CREATE FLOW MODAL */}
+      {showCreateFlowModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-900 dark:text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <GitBranch className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Create New Flow & Select Source</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateFlowModal(false)}
+                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {flowCreateError && (
+              <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{flowCreateError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateFlowSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Flow Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Daily Revenue Analytics"
+                  value={newFlowName}
+                  onChange={(e) => setNewFlowName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
+                <select
+                  value={newFlowCategory}
+                  onChange={(e) => setNewFlowCategory(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="General">General</option>
+                  <option value="Finance">Finance</option>
+                  <option value="Marketing">Marketing</option>
+                  <option value="Analytics">Analytics</option>
+                  <option value="Sales">Sales</option>
+                  <option value="Operations">Operations</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Brief description of this pipeline workflow..."
+                  value={newFlowDesc}
+                  onChange={(e) => setNewFlowDesc(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateFlowModal(false)}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={creatingFlow}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1 shadow-sm disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{creatingFlow ? 'Creating...' : 'Create Flow'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CONNECTED DATA SOURCES FOR THIS FLOW */}
+      {flowDatasets.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-4 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div className="flex items-start sm:items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30 shrink-0 mt-0.5 sm:mt-0">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                    Connected Source for {currentFlow?.name || 'this Flow'}
+                  </h4>
+                  <span className="text-[9px] sm:text-[10px] font-mono font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20 uppercase whitespace-nowrap">
+                    Stage Completed ({flowDatasets.length} {flowDatasets.length === 1 ? 'Dataset' : 'Datasets'})
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                  Source data is already ingested and staged in the lakehouse layer for this Flow.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => onNavigateToStep && onNavigateToStep(3)}
+                className="w-full sm:w-auto px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-sm transition-all"
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span>View Staged Lakehouse Data</span>
+              </button>
+            </div>
+          </div>
+
+          {/* DATASETS GRID */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {flowDatasets.map((ds) => {
+              const cols = Array.isArray(ds.columns) ? ds.columns : [];
+              return (
+                <div 
+                  key={ds.id}
+                  className="p-3.5 rounded-xl border border-emerald-200/60 dark:border-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/10 space-y-3"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Database className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white block font-mono">
+                          {ds.name}
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                          Dataset ID: {ds.id}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 uppercase border border-emerald-200 dark:border-emerald-800">
+                      {ds.source_type || 'Database'}
+                    </span>
+                  </div>
+
+                  {/* METRIC BADGES */}
+                  <div className="grid grid-cols-3 gap-2 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/60 dark:border-slate-800/60 text-center font-mono text-[11px]">
+                    <div>
+                      <span className="text-[9px] text-slate-400 block uppercase">Rows Ingested</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                        {(ds.row_count || 0).toLocaleString()}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 block uppercase">Columns</span>
+                      <strong className="text-slate-800 dark:text-slate-200 font-bold text-xs">
+                        {cols.length}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 block uppercase">Stage Status</span>
+                      <strong className="text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                        READY
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* COLUMNS CHIPS PREVIEW */}
+                  {cols.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block font-mono uppercase">
+                        Ingested Schema Columns:
+                      </span>
+                      <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                        {cols.map((c, cIdx) => (
+                          <span
+                            key={cIdx}
+                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                          >
+                            {typeof c === 'string' ? c : (c.name || c.column_name)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-200/60 dark:border-slate-800/60 font-mono">
+                    <span>Ingested: {new Date(ds.created_at || Date.now()).toLocaleString()}</span>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToStep && onNavigateToStep(4)}
+                      className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5"
+                    >
+                      <span>Go to Transform</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <span>Need to connect another source table to this Flow? Configure below:</span>
+          </div>
+        </div>
+      )}
+
       {/* 1. SOURCE ENGINE SELECTOR */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {sourceEngines.map((engine) => {

@@ -7,6 +7,7 @@ import duckdb
 from ..models.schemas import TransformationRule, RuleType, ColumnProfile
 from .schema_engine import profile_dataframe, apply_type_casting, CastColumnRule
 from ..models.db_models import CatalogDB
+from ..services.data_store import DataStoreEngine
 
 class TransformationEngine:
     @staticmethod
@@ -189,12 +190,44 @@ class TransformationEngine:
             target_ds_id = params.get("target_dataset_id")
             left_on = params.get("left_on")
             right_on = params.get("right_on")
-            how = params.get("how", "inner").lower()
+            how = (params.get("how") or "inner").lower()
+            suffix_left = params.get("suffix_left", "")
+            suffix_right = params.get("suffix_right", "_joined")
+            selected_columns = params.get("selected_columns", None)
 
             if target_ds_id and left_on and right_on:
                 target_ds_info = CatalogDB.get_staged_dataset(target_ds_id)
-                if target_ds_info:
-                    df_target = pd.read_parquet(target_ds_info["storage_path"])
-                    df = df.merge(df_target, left_on=left_on, right_on=right_on, how=how, suffixes=("", "_joined"))
+                if not target_ds_info:
+                    raise FileNotFoundError(f"Joined target dataset '{target_ds_id}' not found in catalog.")
+
+                df_target = DataStoreEngine.load_staged_dataframe(target_ds_info)
+
+                if left_on not in df.columns:
+                    raise KeyError(f"Left join column '{left_on}' not found in working dataset columns: {list(df.columns)}")
+
+                if right_on not in df_target.columns:
+                    raise KeyError(f"Right join column '{right_on}' not found in '{target_ds_info.get('name', target_ds_id)}' columns: {list(df_target.columns)}")
+
+                # Filter target columns if specified
+                if selected_columns and isinstance(selected_columns, list):
+                    cols_to_keep = list(set([right_on] + [c for c in selected_columns if c in df_target.columns]))
+                    df_target = df_target[cols_to_keep]
+
+                # Harmonize key types to prevent merge type mismatch
+                if df[left_on].dtype != df_target[right_on].dtype:
+                    try:
+                        df_target[right_on] = df_target[right_on].astype(df[left_on].dtype)
+                    except Exception:
+                        df[left_on] = df[left_on].astype(str)
+                        df_target[right_on] = df_target[right_on].astype(str)
+
+                # Merge DataFrames
+                df = df.merge(
+                    df_target,
+                    left_on=left_on,
+                    right_on=right_on,
+                    how=how,
+                    suffixes=(suffix_left, suffix_right)
+                )
 
         return df

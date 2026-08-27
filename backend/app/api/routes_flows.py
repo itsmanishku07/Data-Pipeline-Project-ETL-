@@ -31,6 +31,26 @@ def get_flow(flow_id: str):
     flow["pipeline_jobs"] = CatalogDB.list_jobs(limit=10, flow_id=flow_id)
     return flow
 
+@router.get("/{flow_id}/rules")
+def get_flow_rules(flow_id: str):
+    """Get the saved transformation rules for a specific flow."""
+    flow = CatalogDB.get_flow(flow_id)
+    if not flow:
+        flow = CatalogDB.create_flow({
+            "id": flow_id,
+            "name": f"Flow {flow_id}",
+            "category": "General",
+            "rules": []
+        })
+    return {"flow_id": flow_id, "rules": flow.get("rules", [])}
+
+@router.put("/{flow_id}/rules")
+def save_flow_rules(flow_id: str, payload: Dict[str, Any]):
+    """Save or update transformation rules for a specific flow."""
+    rules = payload.get("rules", [])
+    updated_flow = CatalogDB.save_flow_rules(flow_id, rules)
+    return {"success": True, "message": f"Saved {len(rules)} rules to flow {flow_id}", "flow": updated_flow}
+
 @router.delete("/{flow_id}")
 def delete_flow(flow_id: str):
     """Delete a data flow."""

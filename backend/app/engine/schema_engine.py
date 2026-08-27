@@ -113,21 +113,20 @@ def apply_type_casting(df: pd.DataFrame, cast_rules: List[CastColumnRule]) -> Tu
 
         try:
             if "Integer" in target_type:
-                # Clean strings if needed
-                if df_out[col].dtype == object:
+                if not pd.api.types.is_numeric_dtype(df_out[col]):
                     clean_s = df_out[col].astype(str).str.replace(r"[^\d\-]", "", regex=True)
                     df_out[col] = pd.to_numeric(clean_s, errors="coerce").astype("Int32")
                 else:
                     df_out[col] = pd.to_numeric(df_out[col], errors="coerce").astype("Int32")
             elif "Long" in target_type:
-                if df_out[col].dtype == object:
+                if not pd.api.types.is_numeric_dtype(df_out[col]):
                     clean_s = df_out[col].astype(str).str.replace(r"[^\d\-]", "", regex=True)
                     df_out[col] = pd.to_numeric(clean_s, errors="coerce").astype("Int64")
                 else:
                     df_out[col] = pd.to_numeric(df_out[col], errors="coerce").astype("Int64")
             elif "Double" in target_type or "Float" in target_type or "Decimal" in target_type:
-                if df_out[col].dtype == object:
-                    clean_s = df_out[col].astype(str).str.replace(r"[\$,]", "", regex=True)
+                if not pd.api.types.is_numeric_dtype(df_out[col]):
+                    clean_s = df_out[col].astype(str).str.replace(r"[^\d\.\-]", "", regex=True)
                     df_out[col] = pd.to_numeric(clean_s, errors="coerce")
                 else:
                     df_out[col] = pd.to_numeric(df_out[col], errors="coerce")

@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  GitBranch,
   Database, 
   Sparkles, 
   Layers, 
@@ -8,10 +9,18 @@ import {
   History, 
   Sun, 
   Moon, 
-  X
+  X,
+  PanelLeftClose
 } from 'lucide-react';
 
 const navItems = [
+  { 
+    id: 0, 
+    label: 'Flows Tracker', 
+    description: 'Stage Progress & Matrix',
+    icon: GitBranch,
+    badge: 'Tracker'
+  },
   { 
     id: 1, 
     label: 'Data Sources', 
@@ -64,7 +73,9 @@ export const Sidebar = ({
   onToggleTheme,
   stagedCount = 0,
   isOpen = false,
-  onClose
+  onClose,
+  isHidden = false,
+  onToggleHide
 }) => {
   const handleItemClick = (id) => {
     onStepClick(id);
@@ -84,16 +95,20 @@ export const Sidebar = ({
 
       {/* Sidebar Drawer */}
       <aside 
-        className={`fixed md:sticky top-0 left-0 z-50 md:z-40 w-72 md:w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between shrink-0 h-screen transition-transform duration-300 ease-in-out select-none ${
-          isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        className={`fixed md:relative top-0 left-0 z-50 md:z-30 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 h-screen transition-all duration-300 ease-in-out select-none ${
+          isOpen
+            ? 'w-72 translate-x-0 opacity-100 pointer-events-auto'
+            : isHidden
+            ? 'w-0 -translate-x-full md:w-0 md:opacity-0 md:pointer-events-none md:border-r-0 overflow-hidden'
+            : 'w-72 md:w-64 -translate-x-full md:translate-x-0 md:opacity-100'
         }`}
       >
-        {/* Brand Header */}
-        <div>
-          <div className="px-5 py-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        {/* Brand Header & Menu Wrapper */}
+        <div className="w-72 md:w-64 flex flex-col h-full">
+          <div className="px-4 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
             <div 
               className="cursor-pointer"
-              onClick={() => handleItemClick(1)}
+              onClick={() => handleItemClick(0)}
             >
               <h1 className="font-bold text-sm text-slate-900 dark:text-white tracking-tight leading-none">
                 DataFlow Studio
@@ -101,7 +116,7 @@ export const Sidebar = ({
               <span className="text-[10px] text-slate-400 font-mono block mt-1">PySpark & Lakehouse</span>
             </div>
 
-            <div className="flex items-center space-x-1.5">
+            <div className="flex items-center space-x-1">
               {/* Theme Switcher */}
               <button
                 type="button"
@@ -116,6 +131,19 @@ export const Sidebar = ({
                 )}
               </button>
 
+              {/* Hide / Collapse Sidebar on Desktop */}
+              {onToggleHide && (
+                <button
+                  type="button"
+                  onClick={onToggleHide}
+                  className="hidden md:flex p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 transition-colors"
+                  title="Hide Sidebar (Ctrl+B)"
+                  aria-label="Hide Sidebar"
+                >
+                  <PanelLeftClose className="w-3.5 h-3.5" />
+                </button>
+              )}
+
               {/* Close Button on Mobile */}
               <button
                 type="button"
@@ -129,17 +157,18 @@ export const Sidebar = ({
           </div>
 
           {/* Navigation Menu List */}
-          <div className="px-3 py-4 space-y-1 overflow-y-auto max-h-[calc(100vh-100px)]">
-            <div className="px-2 mb-2">
+          <div className="px-3 py-4 space-y-1 flex-1 overflow-y-auto">
+            <div className="px-2 mb-2 flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Pipeline Workspace
               </span>
+              <span className="text-[9px] font-mono text-slate-400 hidden md:inline">Ctrl+B</span>
             </div>
 
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentStep === item.id;
-              const isAccessible = item.id <= Math.max(currentStep, maxStepReached) || item.id === 6;
+              const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6;
 
               return (
                 <button

@@ -9,12 +9,19 @@ from .api.routes_transform import router as transform_router
 from .api.routes_jobs import router as jobs_router
 from .api.routes_history import router as history_router
 from .api.routes_flows import router as flows_router
-from .models.db_models import init_db
+# Auto-initialize metadata tables on server boot
+try:
+    init_db()
+except Exception as _e:
+    pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: ensure databases
-    init_db()
+    try:
+        init_db()
+    except Exception:
+        pass
     yield
 
 app = FastAPI(

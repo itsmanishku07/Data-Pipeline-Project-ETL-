@@ -26,31 +26,47 @@ class DatabaseConnector(BaseConnector):
         return {}
 
     def _get_connection_url(self) -> str:
-        raw_user = self.config.username or ""
+        raw_host = (self.config.host or "localhost").strip()
+        raw_user = (self.config.username or "").strip()
         raw_pwd = self.config.password or ""
+        port = self.config.port
+
+        # Handle accidental "user@host" or "host:port" in host input
+        if "@" in raw_host:
+            parts = raw_host.split("@")
+            if not raw_user:
+                raw_user = parts[0]
+            raw_host = parts[-1]
+
+        if ":" in raw_host and not raw_host.startswith("http"):
+            parts = raw_host.split(":")
+            raw_host = parts[0]
+            try:
+                port = int(parts[1])
+            except Exception:
+                pass
+
         user = urllib.parse.quote_plus(raw_user) if raw_user else ""
         pwd = f":{urllib.parse.quote_plus(raw_pwd)}" if raw_pwd else ""
         auth = f"{user}{pwd}@" if user else ""
 
-        host = self.config.host or "localhost"
-
         if self.config.db_type == DatabaseType.POSTGRES:
-            port = self.config.port or 5432
+            port = port or 5432
             db = self.config.database or "postgres"
             user_default = auth if auth else "postgres@"
-            return f"postgresql+pg8000://{user_default}{host}:{port}/{db}"
+            return f"postgresql+pg8000://{user_default}{raw_host}:{port}/{db}"
 
         elif self.config.db_type == DatabaseType.MYSQL:
-            port = self.config.port or 3306
+            port = port or 3306
             db = self.config.database or ""
             user_default = auth if auth else "root@"
-            return f"mysql+pymysql://{user_default}{host}:{port}/{db}"
+            return f"mysql+pymysql://{user_default}{raw_host}:{port}/{db}"
 
         elif self.config.db_type == DatabaseType.SQLSERVER:
-            port = self.config.port or 1433
+            port = port or 1433
             db = self.config.database or "master"
             user_default = auth if auth else "sa@"
-            return f"mssql+pymssql://{user_default}{host}:{port}/{db}"
+            return f"mssql+pymssql://{user_default}{raw_host}:{port}/{db}"
 
         elif self.config.db_type == DatabaseType.SQLITE:
             path = self.config.sqlite_path or "storage/app.db"

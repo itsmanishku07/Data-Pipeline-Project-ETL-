@@ -1,5 +1,6 @@
 import uuid
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -23,6 +24,65 @@ from ..engine.transform_engine import TransformationEngine
 from ..engine.schema_engine import profile_dataframe
 from .data_store import DataStoreEngine
 
+def _build_db_url_and_args(cfg: DatabaseDestinationConfig, db_override: Optional[str] = None) -> Tuple[str, dict]:
+    """
+    Constructs a safe, URL-encoded SQLAlchemy connection string and engine args.
+    Handles special characters in passwords/usernames and enables SSL for cloud databases.
+    """
+    raw_host = (cfg.host or "localhost").strip()
+    raw_user = (cfg.username or "").strip()
+    raw_pwd = cfg.password or ""
+    raw_db = db_override if db_override is not None else (cfg.database or "")
+    port = cfg.port
+
+    # Handle accidental "user@host" or "host:port" in host input
+    if "@" in raw_host:
+        parts = raw_host.split("@")
+        if not raw_user:
+            raw_user = parts[0]
+        raw_host = parts[-1]
+
+    if ":" in raw_host and not raw_host.startswith("http"):
+        parts = raw_host.split(":")
+        raw_host = parts[0]
+        try:
+            port = int(parts[1])
+        except Exception:
+            pass
+
+    user = urllib.parse.quote_plus(raw_user) if raw_user else ""
+    pwd = f":{urllib.parse.quote_plus(raw_pwd)}" if raw_pwd else ""
+    auth = f"{user}{pwd}@" if user else ""
+
+    db_type = (cfg.db_type or "mysql").lower()
+    connect_args = {"connect_timeout": 15}
+
+    if db_type == "mysql":
+        port = port or 3306
+        url = f"mysql+pymysql://{auth}{raw_host}:{port}/{raw_db}"
+        # Automatically enable SSL for cloud-hosted MySQL servers
+        if any(cloud in raw_host.lower() for cloud in [".azure.com", ".amazonaws.com", ".psdb.cloud", ".aivencloud.com", ".digitalocean.com"]):
+            connect_args["ssl"] = {"ssl_disabled": False}
+        return url, connect_args
+
+    elif db_type == "postgresql":
+        port = port or 5432
+        db_name = raw_db or "postgres"
+        url = f"postgresql+pg8000://{auth}{raw_host}:{port}/{db_name}"
+        return url, connect_args
+
+    elif db_type == "sqlserver":
+        port = port or 1433
+        db_name = raw_db or "master"
+        url = f"mssql+pymssql://{auth}{raw_host}:{port}/{db_name}"
+        return url, connect_args
+
+    elif db_type == "sqlite":
+        path = raw_db or "storage/app.db"
+        return f"sqlite:///{path}", {}
+
+    return f"mysql+pymysql://{auth}{raw_host}:{port or 3306}/{raw_db}", connect_args
+
 class JobService:
     @staticmethod
     def test_destination(dest_req: ExportDestinationRequest) -> Dict[str, Any]:
@@ -34,33 +94,32 @@ class JobService:
 
         elif dest_type == DestinationTypeEnum.DATABASE and dest_req.database_dest:
             cfg = dest_req.database_dest
-            db_type = cfg.db_type.lower()
+            db_type = (cfg.db_type or "mysql").lower()
 
             try:
                 if db_type == "mysql":
-                    # Connect to server to test root/user access
-                    admin_url = f"mysql+pymysql://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/information_schema"
-                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+                    admin_url, conn_args = _build_db_url_and_args(cfg, db_override="information_schema")
+                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args=conn_args)
                     with admin_engine.connect() as conn:
                         res = conn.execute(text("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = :db"), {"db": cfg.database})
                         db_exists = res.fetchone() is not None
 
-                    msg = f"Connected to MySQL server ({cfg.host}:{cfg.port}). Database '{cfg.database}' {'exists' if db_exists else 'does not exist (will be created on execution)'}."
+                    msg = f"Connected to MySQL server ({cfg.host}:{cfg.port or 3306}). Database '{cfg.database}' {'exists' if db_exists else 'does not exist (will be created on execution)'}."
                     return {"success": True, "message": msg, "database_exists": db_exists}
 
                 elif db_type == "postgresql":
-                    admin_url = f"postgresql+psycopg2://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/postgres"
-                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+                    admin_url, conn_args = _build_db_url_and_args(cfg, db_override="postgres")
+                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args=conn_args)
                     with admin_engine.connect() as conn:
                         res = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :db"), {"db": cfg.database})
                         db_exists = res.fetchone() is not None
 
-                    msg = f"Connected to PostgreSQL server ({cfg.host}:{cfg.port}). Database '{cfg.database}' {'exists' if db_exists else 'does not exist (will be created on execution)'}."
+                    msg = f"Connected to PostgreSQL server ({cfg.host}:{cfg.port or 5432}). Database '{cfg.database}' {'exists' if db_exists else 'does not exist (will be created on execution)'}."
                     return {"success": True, "message": msg, "database_exists": db_exists}
 
                 elif db_type == "sqlserver":
-                    admin_url = f"mssql+pyodbc://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/master?driver=ODBC+Driver+17+for+SQL+Server"
-                    admin_engine = create_engine(admin_url, pool_pre_ping=True)
+                    admin_url, conn_args = _build_db_url_and_args(cfg, db_override="master")
+                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args=conn_args)
                     with admin_engine.connect() as conn:
                         res = conn.execute(text("SELECT 1 FROM sys.databases WHERE name = :db"), {"db": cfg.database})
                         db_exists = res.fetchone() is not None
@@ -85,52 +144,35 @@ class JobService:
 
     @staticmethod
     def _export_to_database(df: pd.DataFrame, cfg: DatabaseDestinationConfig, logs: List[str]):
-        db_type = cfg.db_type.lower()
-        logs.append(f"[DESTINATION] Preparing database export to {db_type.upper()} ({cfg.host}:{cfg.port}/{cfg.database})...")
+        db_type = (cfg.db_type or "mysql").lower()
+        logs.append(f"[DESTINATION] Preparing database export to {db_type.upper()} ({cfg.host}:{cfg.port or ''}/{cfg.database})...")
 
         # 1. Create database if not exists
         if cfg.create_database_if_not_exists:
             try:
                 if db_type == "mysql":
-                    admin_url = f"mysql+pymysql://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/information_schema"
-                    admin_engine = create_engine(admin_url, pool_pre_ping=True)
+                    admin_url, conn_args = _build_db_url_and_args(cfg, db_override="information_schema")
+                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args=conn_args)
                     with admin_engine.connect() as conn:
                         conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{cfg.database}` DEFAULT CHARACTER SET utf8mb4;"))
                         conn.commit()
                     logs.append(f"[DESTINATION] Verified MySQL database `{cfg.database}` (created if not exists).")
 
                 elif db_type == "postgresql":
-                    import psycopg2
-                    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-                    conn_pg = psycopg2.connect(
-                        host=cfg.host,
-                        port=cfg.port,
-                        user=cfg.username,
-                        password=cfg.password,
-                        dbname="postgres"
-                    )
-                    conn_pg.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-                    cur = conn_pg.cursor()
-                    cur.execute(f"SELECT 1 FROM pg_database WHERE datname = '{cfg.database}';")
-                    if not cur.fetchone():
-                        cur.execute(f'CREATE DATABASE "{cfg.database}";')
-                        logs.append(f"[DESTINATION] Created PostgreSQL database \"{cfg.database}\".")
-                    cur.close()
-                    conn_pg.close()
+                    admin_url, conn_args = _build_db_url_and_args(cfg, db_override="postgres")
+                    admin_engine = create_engine(admin_url, pool_pre_ping=True, connect_args=conn_args)
+                    with admin_engine.connect() as conn:
+                        res = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :db"), {"db": cfg.database})
+                        if not res.fetchone():
+                            conn.execute(text(f'CREATE DATABASE "{cfg.database}";'))
+                            conn.commit()
+                            logs.append(f"[DESTINATION] Created PostgreSQL database \"{cfg.database}\".")
             except Exception as e:
                 logs.append(f"[DESTINATION WARN] Database check/create notice: {str(e)}")
 
         # 2. Connect to the target database
-        if db_type == "mysql":
-            target_url = f"mysql+pymysql://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/{cfg.database}"
-        elif db_type == "postgresql":
-            target_url = f"postgresql+psycopg2://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/{cfg.database}"
-        elif db_type == "sqlserver":
-            target_url = f"mssql+pyodbc://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}/{cfg.database}?driver=ODBC+Driver+17+for+SQL+Server"
-        else:
-            raise ValueError(f"Unsupported database destination: {db_type}")
-
-        target_engine = create_engine(target_url, pool_pre_ping=True)
+        target_url, target_conn_args = _build_db_url_and_args(cfg)
+        target_engine = create_engine(target_url, pool_pre_ping=True, connect_args=target_conn_args)
 
         # 3. Create schema if needed (PostgreSQL)
         if cfg.schema_name and cfg.create_schema_if_not_exists and db_type == "postgresql":
@@ -166,9 +208,13 @@ class JobService:
         if not meta:
             raise FileNotFoundError(f"Staged dataset {request.staging_dataset_id} metadata not found.")
 
+        # Resolve flow_id from request or dataset meta
+        resolved_flow_id = request.flow_id or meta.get("flow_id") or "flow_default_01"
+
         # Save initial RUNNING Job State
         job_dict = {
             "id": job_id,
+            "flow_id": resolved_flow_id,
             "name": request.name,
             "status": JobStatusEnum.RUNNING.value,
             "progress": 10.0,
@@ -329,8 +375,8 @@ class JobService:
         )
 
     @staticmethod
-    def list_jobs(limit: int = 50) -> List[JobStatus]:
-        jobs = CatalogDB.list_jobs(limit=limit)
+    def list_jobs(limit: int = 50, flow_id: Optional[str] = None) -> List[JobStatus]:
+        jobs = CatalogDB.list_jobs(limit=limit, flow_id=flow_id)
         results = []
         for r in jobs:
             results.append(JobStatus(

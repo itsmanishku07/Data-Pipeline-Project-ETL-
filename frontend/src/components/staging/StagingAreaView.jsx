@@ -231,27 +231,27 @@ export const StagingAreaView = ({
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* Top Navigation Bar with Back Button */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center space-x-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-4 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={handleBackToGallery}
-            className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center space-x-1 text-xs font-semibold"
+            className="p-1.5 sm:p-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center space-x-1 text-xs font-semibold shrink-0 mt-0.5 sm:mt-0"
             title="Back to all stages"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>All Stages</span>
+            <span className="hidden sm:inline">All Stages</span>
           </button>
 
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 uppercase">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1">
+              <span className="text-[9px] sm:text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 uppercase shrink-0">
                 MYSQL STAGE TABLE
               </span>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{activeDataset.name}</h3>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-              ID: {activeDataset.id} • {activeDataset.row_count.toLocaleString()} rows • {activeDataset.column_count} columns • {activeDataset.storage_format.toUpperCase()}
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate block">{activeDataset.name}</h3>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 truncate">
+              ID: {activeDataset.id} • {activeDataset.row_count.toLocaleString()} rows • {activeDataset.column_count} cols
             </p>
           </div>
         </div>

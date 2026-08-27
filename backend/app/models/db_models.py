@@ -57,10 +57,16 @@ def init_db():
         description TEXT,
         category TEXT DEFAULT 'General',
         status TEXT DEFAULT 'active',
+        rules_json TEXT DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT
     )
     """)
+
+    try:
+        cursor.execute("ALTER TABLE flows ADD COLUMN rules_json TEXT DEFAULT '[]'")
+    except Exception:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS staged_datasets (
@@ -153,6 +159,28 @@ def init_db():
     )
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS staged_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dataset_id TEXT NOT NULL,
+        flow_id TEXT,
+        row_index INTEGER NOT NULL,
+        data_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (dataset_id, row_index)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stg_rec_ds ON staged_records(dataset_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stg_rec_flow ON staged_records(flow_id)")
+
+    # Clean legacy dynamic SQLite tables
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'stg_data_%'")
+        for r in cursor.fetchall():
+            cursor.execute(f"DROP TABLE IF EXISTS {r[0]}")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -168,11 +196,16 @@ def init_db():
                     description TEXT,
                     category VARCHAR(64) DEFAULT 'General',
                     status VARCHAR(32) DEFAULT 'active',
+                    rules_json JSON NULL,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NULL,
                     INDEX idx_flows_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
+                try:
+                    mconn.execute(text("ALTER TABLE dataflow_flows ADD COLUMN rules_json JSON NULL"))
+                except Exception:
+                    pass
                 mconn.execute(text("""
                 CREATE TABLE IF NOT EXISTS dataflow_staged_datasets (
                     id VARCHAR(64) PRIMARY KEY,
@@ -180,16 +213,29 @@ def init_db():
                     name VARCHAR(255) NOT NULL,
                     description TEXT,
                     source_type VARCHAR(64) NOT NULL,
-                    source_summary TEXT,
-                    row_count INT DEFAULT 0,
-                    column_count INT DEFAULT 0,
+                    source_summary VARCHAR(255),
+                    row_count INT,
+                    column_count INT,
                     storage_path TEXT NOT NULL,
-                    storage_format VARCHAR(32) DEFAULT 'mysql_table',
+                    storage_format VARCHAR(32) NOT NULL,
                     columns_json JSON NOT NULL,
                     file_size_bytes BIGINT DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     INDEX idx_ds_flow (flow_id),
                     INDEX idx_ds_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """))
+                mconn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dataflow_staged_records (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    dataset_id VARCHAR(64) NOT NULL,
+                    flow_id VARCHAR(64) NULL,
+                    row_index INT NOT NULL,
+                    data_json LONGTEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_stg_rec_ds (dataset_id),
+                    INDEX idx_stg_rec_flow (flow_id),
+                    UNIQUE KEY uk_dataset_row (dataset_id, row_index)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
                 mconn.execute(text("""
@@ -266,9 +312,32 @@ def init_db():
                     INDEX idx_conn_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
+
+                # Clean legacy dynamic MySQL tables
+                try:
+                    res_dyn = mconn.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = :db AND table_name LIKE 'stg_data_%'"), {"db": settings.MYSQL_DATABASE})
+                    for r in res_dyn.fetchall():
+                        mconn.execute(text(f"DROP TABLE IF EXISTS `{r[0]}`"))
+                except Exception:
+                    pass
+
+                # Remove any statically created default flow if present
+                mconn.execute(text("DELETE FROM dataflow_flows WHERE id = 'flow_default_01'"))
                 mconn.commit()
         except Exception as e:
             print(f"[WARN] MySQL metadata table initialization skipped: {e}")
+
+    # Remove default Flow from SQLite if present
+    try:
+        conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM flows WHERE id = 'flow_default_01'")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    except Exception:
+        pass
 
 # Run initialization at module load
 init_db()
@@ -282,6 +351,81 @@ def _format_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[k] = v
     return out
+
+def _enrich_flow_with_stages(f: Dict[str, Any], conn, is_mysql: bool = True) -> Dict[str, Any]:
+    flow_id = f["id"]
+    dataset_count = f.get("dataset_count", 0)
+    total_rows = f.get("total_rows", 0)
+    rules_count = len(f.get("rules", []))
+    
+    latest_job = None
+    try:
+        if is_mysql:
+            j_res = conn.execute(text("SELECT * FROM dataflow_pipeline_jobs WHERE flow_id = :fid OR flow_id IS NULL ORDER BY created_at DESC LIMIT 1"), {"fid": flow_id})
+            j_row = j_res.fetchone()
+            if j_row:
+                latest_job = _format_row(dict(j_row._mapping))
+        else:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pipeline_jobs WHERE flow_id = ? OR flow_id IS NULL ORDER BY created_at DESC LIMIT 1", (flow_id,))
+            j_row = cursor.fetchone()
+            if j_row:
+                latest_job = dict(j_row)
+    except Exception:
+        pass
+
+    job_completed = latest_job is not None and str(latest_job.get("status", "")).lower() == "completed"
+
+    stages = {
+        "ingestion": {
+            "id": "ingestion",
+            "name": "Data Ingestion",
+            "completed": dataset_count > 0,
+            "status": "COMPLETED" if dataset_count > 0 else "PENDING",
+            "count": dataset_count,
+            "summary": f"{dataset_count} Source Set{'s' if dataset_count != 1 else ''} Connected" if dataset_count > 0 else "No sources connected"
+        },
+        "schema": {
+            "id": "schema",
+            "name": "Schema Profiling & Types",
+            "completed": dataset_count > 0,
+            "status": "COMPLETED" if dataset_count > 0 else "PENDING",
+            "count": dataset_count,
+            "summary": "Spark Types Profiled & Casted" if dataset_count > 0 else "Pending Schema Profiling"
+        },
+        "staging": {
+            "id": "staging",
+            "name": "Lakehouse Staging",
+            "completed": dataset_count > 0 and total_rows > 0,
+            "status": "COMPLETED" if dataset_count > 0 else "PENDING",
+            "count": total_rows,
+            "summary": f"{total_rows:,} Staged Rows Ready" if total_rows > 0 else "Staging storage empty"
+        },
+        "transformation": {
+            "id": "transformation",
+            "name": "Transform Studio",
+            "completed": rules_count > 0,
+            "status": "COMPLETED" if rules_count > 0 else "PENDING",
+            "count": rules_count,
+            "summary": f"{rules_count} Active Spark Rules Configured" if rules_count > 0 else "No Transformation Rules"
+        },
+        "execution": {
+            "id": "execution",
+            "name": "Pipeline Runner & Export",
+            "completed": job_completed,
+            "status": "COMPLETED" if job_completed else ("FAILED" if latest_job and str(latest_job.get("status")).lower() == "failed" else "PENDING"),
+            "count": 1 if latest_job else 0,
+            "summary": f"Last Run: {str(latest_job.get('status')).upper()} ({latest_job.get('output_rows', 0):,} rows)" if latest_job else "Pipeline execution pending"
+        }
+    }
+
+    completed_count = sum(1 for s in stages.values() if s["completed"])
+    f["stages"] = stages
+    f["completed_stages_count"] = completed_count
+    f["total_stages_count"] = 5
+    f["progress_percentage"] = int((completed_count / 5) * 100)
+    f["latest_job"] = latest_job
+    return f
 
 class CatalogDB:
     # --- SAVED SOURCE CONNECTIONS ---
@@ -444,6 +588,7 @@ class CatalogDB:
     def create_flow(flow_dict: Dict[str, Any]) -> Dict[str, Any]:
         flow_id = flow_dict.get("id") or f"flow_{uuid.uuid4().hex[:8]}"
         now_str = datetime.utcnow().isoformat()
+        rules_json_str = json.dumps(flow_dict.get("rules", []))
 
         # 1. MySQL First
         db_type, engine = get_db_connection()
@@ -451,15 +596,16 @@ class CatalogDB:
             try:
                 with engine.connect() as mconn:
                     mconn.execute(text("""
-                    INSERT INTO dataflow_flows (id, name, description, category, status, created_at, updated_at)
-                    VALUES (:id, :name, :description, :category, :status, NOW(), NOW())
-                    ON DUPLICATE KEY UPDATE name=:name, description=:description, category=:category, status=:status, updated_at=NOW()
+                    INSERT INTO dataflow_flows (id, name, description, category, status, rules_json, created_at, updated_at)
+                    VALUES (:id, :name, :description, :category, :status, :rules_json, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE name=:name, description=:description, category=:category, status=:status, rules_json=:rules_json, updated_at=NOW()
                     """), {
                         "id": flow_id,
                         "name": flow_dict["name"],
                         "description": flow_dict.get("description", ""),
                         "category": flow_dict.get("category", "General"),
                         "status": flow_dict.get("status", "active"),
+                        "rules_json": rules_json_str
                     })
                     mconn.commit()
             except Exception:
@@ -470,9 +616,9 @@ class CatalogDB:
             conn = sqlite3.connect(settings.CATALOG_DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT OR REPLACE INTO flows (id, name, description, category, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (flow_id, flow_dict["name"], flow_dict.get("description", ""), flow_dict.get("category", "General"), flow_dict.get("status", "active"), now_str, now_str))
+            INSERT OR REPLACE INTO flows (id, name, description, category, status, rules_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (flow_id, flow_dict["name"], flow_dict.get("description", ""), flow_dict.get("category", "General"), flow_dict.get("status", "active"), rules_json_str, now_str, now_str))
             conn.commit()
             conn.close()
         except Exception:
@@ -494,16 +640,19 @@ class CatalogDB:
         if db_type == "mysql" and engine is not None:
             try:
                 with engine.connect() as mconn:
-                    res = mconn.execute(text("SELECT * FROM dataflow_flows ORDER BY created_at DESC"))
+                    res = mconn.execute(text("SELECT * FROM dataflow_flows ORDER BY created_at ASC"))
                     rows = res.fetchall()
                     flows = []
                     for r in rows:
                         f = _format_row(dict(r._mapping))
-                        # Fetch linked dataset count & row count
-                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL"), {"fid": f["id"]})
+                        f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
+                        f.pop("rules_json", None)
+                        # Fetch linked dataset count & row count strictly for this flow
+                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid"), {"fid": f["id"]})
                         ds_count, total_rows = ds_res.fetchone()
                         f["dataset_count"] = ds_count or 0
                         f["total_rows"] = int(total_rows or 0)
+                        f = _enrich_flow_with_stages(f, mconn, is_mysql=True)
                         flows.append(f)
                     return flows
             except Exception:
@@ -514,15 +663,18 @@ class CatalogDB:
             conn = sqlite3.connect(settings.CATALOG_DB_PATH)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM flows ORDER BY created_at DESC")
+            cursor.execute("SELECT * FROM flows ORDER BY created_at ASC")
             rows = cursor.fetchall()
             flows = []
             for r in rows:
                 f = dict(r)
-                cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (f["id"],))
+                f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
+                f.pop("rules_json", None)
+                cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ?", (f["id"],))
                 ds_count, total_rows = cursor.fetchone()
                 f["dataset_count"] = ds_count or 0
                 f["total_rows"] = int(total_rows or 0)
+                f = _enrich_flow_with_stages(f, conn, is_mysql=False)
                 flows.append(f)
             conn.close()
             return flows
@@ -539,10 +691,13 @@ class CatalogDB:
                     row = res.fetchone()
                     if row:
                         f = _format_row(dict(row._mapping))
-                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL"), {"fid": flow_id})
+                        f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
+                        f.pop("rules_json", None)
+                        ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid"), {"fid": flow_id})
                         ds_count, total_rows = ds_res.fetchone()
                         f["dataset_count"] = ds_count or 0
                         f["total_rows"] = int(total_rows or 0)
+                        f = _enrich_flow_with_stages(f, mconn, is_mysql=True)
                         return f
             except Exception:
                 pass
@@ -557,14 +712,75 @@ class CatalogDB:
                 conn.close()
                 return None
             f = dict(row)
-            cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL", (flow_id,))
+            f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
+            f.pop("rules_json", None)
+            cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ?", (flow_id,))
             ds_count, total_rows = cursor.fetchone()
             f["dataset_count"] = ds_count or 0
             f["total_rows"] = int(total_rows or 0)
+            f = _enrich_flow_with_stages(f, conn, is_mysql=False)
             conn.close()
             return f
         except Exception:
             return None
+
+    @staticmethod
+    def get_flow_rules(flow_id: str) -> List[Dict[str, Any]]:
+        f = CatalogDB.get_flow(flow_id)
+        if f and isinstance(f.get("rules"), list):
+            return f["rules"]
+        return []
+
+    @staticmethod
+    def save_flow_rules(flow_id: str, rules: List[Any]) -> Optional[Dict[str, Any]]:
+        """Persists transformation rules configured for a flow and returns the updated flow."""
+        rules_json_str = json.dumps([r if isinstance(r, dict) else (r.dict() if hasattr(r, "dict") else str(r)) for r in rules])
+        now_str = datetime.utcnow().isoformat()
+
+        # Ensure flow exists
+        existing = CatalogDB.get_flow(flow_id)
+        if not existing:
+            CatalogDB.create_flow({
+                "id": flow_id,
+                "name": "Default Analytics Flow" if "default" in flow_id else f"Flow {flow_id}",
+                "category": "General",
+                "rules": rules
+            })
+
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("""
+                    UPDATE dataflow_flows 
+                    SET rules_json = :rules_json, updated_at = NOW()
+                    WHERE id = :id
+                    """), {
+                        "id": flow_id,
+                        "rules_json": rules_json_str
+                    })
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE flows SET rules_json = ?, updated_at = ? WHERE id = ?", (rules_json_str, now_str, flow_id))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="FLOW_RULES_UPDATED",
+            entity_id=flow_id,
+            entity_type="DATA_FLOW",
+            summary=f"Saved {len(rules)} transformation rules to Flow '{flow_id}'",
+            details={"flow_id": flow_id, "rule_count": len(rules)}
+        )
+
+        return CatalogDB.get_flow(flow_id)
 
     @staticmethod
     def delete_flow(flow_id: str) -> bool:
@@ -823,7 +1039,7 @@ class CatalogDB:
             try:
                 with engine.connect() as mconn:
                     if flow_id:
-                        res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets WHERE flow_id = :fid OR flow_id IS NULL ORDER BY created_at DESC"), {"fid": flow_id})
+                        res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets WHERE flow_id = :fid ORDER BY created_at DESC"), {"fid": flow_id})
                     else:
                         res = mconn.execute(text("SELECT * FROM dataflow_staged_datasets ORDER BY created_at DESC"))
                     rows = res.fetchall()
@@ -842,7 +1058,7 @@ class CatalogDB:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             if flow_id:
-                cursor.execute("SELECT * FROM staged_datasets WHERE flow_id = ? OR flow_id IS NULL ORDER BY created_at DESC", (flow_id,))
+                cursor.execute("SELECT * FROM staged_datasets WHERE flow_id = ? ORDER BY created_at DESC", (flow_id,))
             else:
                 cursor.execute("SELECT * FROM staged_datasets ORDER BY created_at DESC")
             rows = cursor.fetchall()

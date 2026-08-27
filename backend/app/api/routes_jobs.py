@@ -1,7 +1,6 @@
-import os
-from fastapi import APIRouter, HTTPException
+from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from typing import List
 from ..models.schemas import JobStatus
 from ..services.job_service import JobService
 from ..config import settings
@@ -9,8 +8,8 @@ from ..config import settings
 router = APIRouter(prefix="/jobs", tags=["Jobs & Lineage"])
 
 @router.get("", response_model=List[JobStatus])
-def list_jobs():
-    return JobService.list_jobs()
+def list_jobs(flow_id: Optional[str] = Query(None)):
+    return JobService.list_jobs(flow_id=flow_id)
 
 @router.get("/{job_id}", response_model=JobStatus)
 def get_job(job_id: str):

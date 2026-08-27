@@ -78,6 +78,21 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  getFlowRules: async (flowId) => {
+    return cachedGet(`flow_rules_${flowId}`, async () => {
+      const res = await api.get(`/flows/${flowId}/rules`);
+      return res.data;
+    });
+  },
+
+  saveFlowRules: async (flowId, rules) => {
+    const res = await api.put(`/flows/${flowId}/rules`, { rules });
+    invalidateDataFlowCache(`flow_${flowId}`);
+    invalidateDataFlowCache(`flow_rules_${flowId}`);
+    invalidateDataFlowCache('flows_list');
+    return res.data;
+  },
+
   // Sources & Saved Connections
   getSavedConnections: async (sourceType = null) => {
     const cacheKey = `conn_${sourceType || 'all'}`;

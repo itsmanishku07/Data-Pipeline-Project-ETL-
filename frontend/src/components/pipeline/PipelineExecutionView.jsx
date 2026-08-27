@@ -6,38 +6,67 @@ import {
   Terminal, 
   Clock, 
   CheckCircle2, 
-  AlertCircle,
-  Database,
-  Cloud,
-  HardDrive,
-  Server,
-  ArrowRight,
-  ArrowLeft,
-  RefreshCw,
-  Zap,
-  BookmarkCheck,
-  PlusCircle,
-  FolderCheck,
-  History,
-  FileCode,
-  Sliders,
-  Search,
-  ExternalLink
+  AlertCircle, 
+  Database, 
+  Cloud, 
+  HardDrive, 
+  Server, 
+  ArrowRight, 
+  ArrowLeft, 
+  RefreshCw, 
+  Zap, 
+  BookmarkCheck, 
+  PlusCircle, 
+  FolderCheck, 
+  History, 
+  FileCode, 
+  Sliders, 
+  Search, 
+  ExternalLink,
+  GitBranch,
+  Sparkles,
+  ChevronRight,
+  Info,
+  Calendar,
+  ListOrdered,
+  Check,
+  X,
+  Tag
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
 
 export const PipelineExecutionView = ({
-  stagedDataset,
+  stagedDataset = null,
   rules = [],
+  flows = [],
+  activeFlowId = null,
+  allStagedDatasets = [],
+  onSelectFlow = null,
   onViewStagedDataset,
   onRestartPipeline,
 }) => {
   // Main View Mode: 'runner' (Configure & Run) | 'history' (Executed Pipelines Hub)
   const [viewMode, setViewMode] = useState('runner');
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
+  const [viewingFlowDetails, setViewingFlowDetails] = useState(null);
 
-  const [pipelineName, setPipelineName] = useState(`${stagedDataset?.name || 'dataset'}_pipeline`);
-  const [outputDatasetName, setOutputDatasetName] = useState(`curated_${stagedDataset?.name || 'dataset'}`);
+  // Sort flows strictly by creation order (earliest created to newest)
+  const sortedFlows = [...flows].sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return timeA - timeB;
+  });
+
+  // Selected Flow & Dataset State
+  const initialFlowId = stagedDataset?.flow_id || activeFlowId || (sortedFlows.length > 0 ? sortedFlows[0].id : '');
+  const [selectedFlowId, setSelectedFlowId] = useState(initialFlowId);
+  const [effectiveDataset, setEffectiveDataset] = useState(stagedDataset || null);
+  const [effectiveRules, setEffectiveRules] = useState(rules || []);
+  const [loadingFlowData, setLoadingFlowData] = useState(false);
+
+  // Pipeline Output Configuration State
+  const [pipelineName, setPipelineName] = useState('');
+  const [outputDatasetName, setOutputDatasetName] = useState('');
   const [exportFormat, setExportFormat] = useState('parquet');
   const [stageOutput, setStageOutput] = useState(true);
 
@@ -48,27 +77,27 @@ export const PipelineExecutionView = ({
   const [dbType, setDbType] = useState('mysql');
   const [dbHost, setDbHost] = useState('localhost');
   const [dbPort, setDbPort] = useState(3306);
-  const [dbName, setDbName] = useState('analytics_warehouse');
+  const [dbName, setDbName] = useState('');
   const [dbSchema, setDbSchema] = useState('public');
   const [dbUser, setDbUser] = useState('root');
-  const [dbPassword, setDbPassword] = useState('3435');
-  const [dbTable, setDbTable] = useState(`${stagedDataset?.name || 'curated'}_gold`);
-  const [dbWriteMode, setDbWriteMode] = useState('replace'); // 'replace', 'append', 'fail'
+  const [dbPassword, setDbPassword] = useState('');
+  const [dbTable, setDbTable] = useState('');
+  const [dbWriteMode, setDbWriteMode] = useState('replace');
   const [createDbIfNotExists, setCreateDbIfNotExists] = useState(true);
   const [createSchemaIfNotExists, setCreateSchemaIfNotExists] = useState(true);
 
   // S3 Destination Settings
-  const [s3Bucket, setS3Bucket] = useState('my-analytics-lakehouse');
-  const [s3Key, setS3Key] = useState(`curated/${stagedDataset?.name || 'data'}.parquet`);
+  const [s3Bucket, setS3Bucket] = useState('');
+  const [s3Key, setS3Key] = useState('');
   const [s3Format, setS3Format] = useState('parquet');
   const [s3Region, setS3Region] = useState('us-east-1');
   const [s3AccessKey, setS3AccessKey] = useState('');
   const [s3SecretKey, setS3SecretKey] = useState('');
 
   // Azure Destination Settings
-  const [azureAccount, setAzureAccount] = useState('datalakeprod');
-  const [azureContainer, setAzureContainer] = useState('curated');
-  const [azurePath, setAzurePath] = useState(`${stagedDataset?.name || 'data'}.parquet`);
+  const [azureAccount, setAzureAccount] = useState('');
+  const [azureContainer, setAzureContainer] = useState('');
+  const [azurePath, setAzurePath] = useState('');
   const [azureKey, setAzureKey] = useState('');
 
   // Saved Connections
@@ -86,19 +115,77 @@ export const PipelineExecutionView = ({
   const [errorMsg, setErrorMsg] = useState(null);
   const [historySearchTerm, setHistorySearchTerm] = useState('');
 
+  // Determine current active flow object
+  const currentFlow = flows.find((f) => f.id === selectedFlowId) || null;
+
+  // Filter datasets belonging strictly to selected flow
+  const flowDatasets = selectedFlowId 
+    ? allStagedDatasets.filter((d) => d.flow_id === selectedFlowId)
+    : allStagedDatasets;
+
+  // Sync flow and load its datasets and saved rules when selectedFlowId changes
+  useEffect(() => {
+    if (!selectedFlowId) return;
+
+    setLoadingFlowData(true);
+    // 1. Load flow rules from DB
+    DataFlowAPI.getFlowRules(selectedFlowId)
+      .then((res) => {
+        if (res && Array.isArray(res.rules)) {
+          setEffectiveRules(res.rules);
+        }
+      })
+      .catch((err) => console.error('Failed to load rules for flow', err))
+      .finally(() => setLoadingFlowData(false));
+
+    // 2. Determine best staged dataset strictly for this flow
+    const matchingDatasets = allStagedDatasets.filter((d) => d.flow_id === selectedFlowId);
+    if (matchingDatasets.length > 0) {
+      setEffectiveDataset(matchingDatasets[0]);
+    } else {
+      setEffectiveDataset(null);
+    }
+    loadJobHistory(selectedFlowId);
+  }, [selectedFlowId, allStagedDatasets]);
+
+  // Update pipeline names whenever effectiveDataset changes
+  useEffect(() => {
+    const dsName = effectiveDataset?.name || currentFlow?.name || 'data';
+    setPipelineName(`${dsName}_pipeline`);
+    setOutputDatasetName(`curated_${dsName}`);
+    setDbTable(`${dsName}_gold`);
+    setS3Key(`curated/${dsName}.parquet`);
+    setAzurePath(`${dsName}.parquet`);
+  }, [effectiveDataset, currentFlow]);
+
   useEffect(() => {
     DataFlowAPI.getSavedConnections()
       .then(setSavedConnections)
       .catch((err) => console.error('Failed to load saved connections', err));
-    loadJobHistory();
+    loadJobHistory(selectedFlowId);
   }, []);
 
-  const loadJobHistory = async () => {
+  const loadJobHistory = async (flowId = null) => {
     try {
-      const jobs = await DataFlowAPI.listJobs();
+      const targetFid = flowId || selectedFlowId;
+      const jobs = await DataFlowAPI.listJobs(targetFid || null);
       setJobHistory(jobs);
     } catch (err) {
       console.error('Job list error', err);
+    }
+  };
+
+  const handleFlowChange = (newFlowId) => {
+    setSelectedFlowId(newFlowId);
+    if (onSelectFlow) {
+      onSelectFlow(newFlowId);
+    }
+  };
+
+  const handleDatasetChange = (datasetId) => {
+    const found = allStagedDatasets.find((d) => d.id === datasetId);
+    if (found) {
+      setEffectiveDataset(found);
     }
   };
 
@@ -139,7 +226,7 @@ export const PipelineExecutionView = ({
       setDestinationType('s3');
       const cfg = conn.config || {};
       setS3Bucket(cfg.s3Bucket || 'my-analytics-lakehouse');
-      setS3Key(cfg.s3Key || `curated/${stagedDataset?.name}.parquet`);
+      setS3Key(cfg.s3Key || `curated/${effectiveDataset?.name || 'data'}.parquet`);
       setS3Region(cfg.s3Region || 'us-east-1');
       setS3AccessKey(cfg.s3AccessKey || '');
       setS3SecretKey(cfg.s3SecretKey || '');
@@ -148,7 +235,7 @@ export const PipelineExecutionView = ({
       const cfg = conn.config || {};
       setAzureAccount(cfg.azureAccount || 'datalakeprod');
       setAzureContainer(cfg.azureContainer || 'curated');
-      setAzurePath(cfg.azurePath || `${stagedDataset?.name}.parquet`);
+      setAzurePath(cfg.azurePath || `${effectiveDataset?.name || 'data'}.parquet`);
       setAzureKey(cfg.azureKey || '');
     }
   };
@@ -218,7 +305,10 @@ export const PipelineExecutionView = ({
   };
 
   const handleRunPipeline = async () => {
-    if (!stagedDataset) return;
+    if (!effectiveDataset) {
+      setErrorMsg('Please select a staged dataset to execute the pipeline DAG.');
+      return;
+    }
     setExecuting(true);
     setErrorMsg(null);
     try {
@@ -226,10 +316,11 @@ export const PipelineExecutionView = ({
 
       const req = {
         name: pipelineName,
-        staging_dataset_id: stagedDataset.id,
-        rules: rules,
+        staging_dataset_id: effectiveDataset.id,
+        rules: effectiveRules.filter((r) => r.enabled),
         output_dataset_name: outputDatasetName,
-        output_description: `Curated via ${rules.length} Spark rules into ${destinationType.toUpperCase()}`,
+        output_description: `Curated via ${effectiveRules.filter((r) => r.enabled).length} Spark rules into ${destinationType.toUpperCase()}`,
+        flow_id: selectedFlowId,
         stage_output: stageOutput,
         export_format: exportFormat,
         destination_config: destConfig,
@@ -237,7 +328,7 @@ export const PipelineExecutionView = ({
 
       const job = await DataFlowAPI.executePipeline(req);
       setActiveJob(job);
-      loadJobHistory();
+      loadJobHistory(selectedFlowId);
     } catch (err) {
       setErrorMsg(err?.response?.data?.detail || err.message || 'Pipeline execution failed');
     } finally {
@@ -286,7 +377,7 @@ export const PipelineExecutionView = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             {selectedJobDetails.output_dataset_id && (
               <button
                 type="button"
@@ -371,27 +462,25 @@ export const PipelineExecutionView = ({
     );
   }
 
-  // ==========================================
-  // MAIN VIEW: FULL-WIDTH RUNNER & EXECUTED HISTORY HUB
-  // ==========================================
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* View Switcher Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm transition-colors">
+      {/* Top Main Navigation Mode Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30">
+          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/30 shrink-0">
             <PlayCircle className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Spark Pipeline Runner & Target Exporter</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-              Stage: <strong className="text-sky-600 dark:text-sky-300">{stagedDataset?.name || 'No Stage Selected'}</strong> • {rules.length} transformation steps
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Pipeline Execution & Destination Loader
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Execute transformation DAGs and export curated data directly to MySQL, PostgreSQL, S3, or Azure.
             </p>
           </div>
         </div>
 
-        {/* View Mode Tabs */}
-        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl">
+        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit self-end sm:self-auto">
           <button
             type="button"
             onClick={() => setViewMode('runner')}
@@ -410,7 +499,7 @@ export const PipelineExecutionView = ({
             }`}
           >
             <History className="w-3.5 h-3.5" />
-            <span>Saved Pipeline Executions ({jobHistory.length})</span>
+            <span>Saved Executions ({jobHistory.length})</span>
           </button>
         </div>
       </div>
@@ -420,9 +509,184 @@ export const PipelineExecutionView = ({
           ========================================== */}
       {viewMode === 'runner' && (
         <div className="space-y-6">
-          {/* Top Main Section: Destination & Output Configuration Form */}
+          {/* FLOW & STAGED DATASET SELECTION CARD */}
+          <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950 text-white rounded-xl p-5 shadow-md border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0">
+                  <GitBranch className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Select Data Flow & Staged Dataset to Load
+                  </h4>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                    Showing all {sortedFlows.length} Data Flows in Chronological Creation Order
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-full flex items-center space-x-1.5">
+                  <Sparkles className="w-3 h-3" />
+                  <span>{effectiveRules.filter((r) => r.enabled).length} Saved Spark Rules Active</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Chronological Flows List Grid */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Available Data Flows ({sortedFlows.length})</span>
+                </label>
+                <span className="text-[10px] text-slate-400 font-mono">Sorted by Creation Order (#1 to #{sortedFlows.length})</span>
+              </div>
+
+              {sortedFlows.length === 0 ? (
+                <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400 font-mono">
+                  No data flows found in metadata catalog.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1">
+                  {sortedFlows.map((flow, index) => {
+                    const isSelected = flow.id === selectedFlowId;
+                    const flowRulesCount = Array.isArray(flow.rules) ? flow.rules.length : 0;
+                    const creationDate = flow.created_at 
+                      ? new Date(flow.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : 'Initial Flow';
+
+                    return (
+                      <div
+                        key={flow.id}
+                        className={`p-3 rounded-xl border transition-all flex flex-col justify-between space-y-2.5 ${
+                          isSelected
+                            ? 'bg-indigo-950/80 border-sky-400 ring-1 ring-sky-400/50 shadow-md'
+                            : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-1.5">
+                            <div className="flex items-center space-x-1.5 min-w-0">
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                                #{index + 1}
+                              </span>
+                              <span className="font-bold text-xs text-white truncate" title={flow.name}>
+                                {flow.name}
+                              </span>
+                            </div>
+
+                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
+                              {flow.category || 'General'}
+                            </span>
+                          </div>
+
+                          <p className="text-[10px] text-slate-400 line-clamp-1 mt-1 font-sans">
+                            {flow.description || 'Enterprise Lakehouse Flow'}
+                          </p>
+
+                          <div className="flex items-center space-x-1 text-[9px] font-mono text-slate-400 mt-1.5">
+                            <Calendar className="w-2.5 h-2.5 text-slate-500" />
+                            <span className="truncate">{creationDate}</span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="text-emerald-400 font-semibold">{flow.dataset_count || 0} Sets</span>
+                            <span>•</span>
+                            <span className="text-sky-300 font-semibold">{flowRulesCount} Rules</span>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setViewingFlowDetails(flow)}
+                              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[10px] font-bold flex items-center space-x-1 transition-colors"
+                              title="View Flow Details"
+                            >
+                              <Info className="w-3 h-3 text-sky-400" />
+                              <span>Details</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleFlowChange(flow.id)}
+                              className={`px-2 py-1 rounded text-[10px] font-bold flex items-center space-x-1 transition-all ${
+                                isSelected
+                                  ? 'bg-sky-500 text-white shadow-sm'
+                                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                              }`}
+                            >
+                              {isSelected ? (
+                                <>
+                                  <Check className="w-3 h-3 text-white" />
+                                  <span>Selected</span>
+                                </>
+                              ) : (
+                                <span>Select</span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Staged Dataset Selector for Selected Flow */}
+            <div className="pt-2 border-t border-white/10">
+              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                Staged Lakehouse Dataset (Attached to Selected Flow "{currentFlow?.name || selectedFlowId}")
+              </label>
+              <select
+                value={effectiveDataset?.id || ''}
+                onChange={(e) => handleDatasetChange(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono text-emerald-300 focus:outline-none focus:border-emerald-400"
+              >
+                {flowDatasets.length === 0 ? (
+                  <option value="">No staged datasets found in this flow</option>
+                ) : (
+                  flowDatasets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.row_count?.toLocaleString()} rows • {d.column_count} cols)
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* Visual DAG Execution Sequence Preview */}
+            {effectiveDataset && (
+              <div className="pt-2 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs font-mono">
+                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 flex items-center space-x-1">
+                  <HardDrive className="w-3 h-3 text-emerald-400" />
+                  <span>Input: <strong>{effectiveDataset.name}</strong> ({effectiveDataset.row_count?.toLocaleString()} rows)</span>
+                </span>
+
+                <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+
+                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-sky-300 flex items-center space-x-1">
+                  <Sliders className="w-3 h-3 text-sky-400" />
+                  <span>DAG: <strong>{effectiveRules.filter((r) => r.enabled).length} Transform Rules</strong></span>
+                </span>
+
+                <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+
+                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-amber-300 flex items-center space-x-1">
+                  <Server className="w-3 h-3 text-amber-400" />
+                  <span>Dest: <strong className="uppercase">{destinationType}</strong> ({destinationType === 'database' ? dbTable : (destinationType === 's3' ? s3Bucket : outputDatasetName)})</span>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Destination & Output Configuration Form */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4 transition-colors">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
                 <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                   <Server className="w-3.5 h-3.5 text-sky-500" />
@@ -518,7 +782,7 @@ export const PipelineExecutionView = ({
                   }`}
                 >
                   <HardDrive className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Lakehouse Parquet</span>
+                  <span className="text-xs font-semibold">Lakehouse Staging</span>
                 </button>
 
                 <button
@@ -531,7 +795,7 @@ export const PipelineExecutionView = ({
                   }`}
                 >
                   <Cloud className="w-4 h-4" />
-                  <span className="text-xs font-semibold">AWS S3</span>
+                  <span className="text-xs font-semibold">AWS S3 Lake</span>
                 </button>
 
                 <button
@@ -543,81 +807,57 @@ export const PipelineExecutionView = ({
                       : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  <Layers className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Azure ADLS</span>
+                  <Cloud className="w-4 h-4" />
+                  <span className="text-xs font-semibold">Azure ADLS Blob</span>
                 </button>
               </div>
 
-              {/* Destination Form: DATABASE */}
+              {/* Dynamic Destination Configuration Forms */}
               {destinationType === 'database' && (
-                <div className="space-y-3 pt-2 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="flex items-center space-x-2">
-                    {['mysql', 'postgresql', 'sqlserver'].map((engine) => (
-                      <button
-                        key={engine}
-                        type="button"
-                        onClick={() => handleDbTypeChange(engine)}
-                        className={`px-3 py-1 rounded-lg text-xs font-mono font-bold uppercase transition-all ${
-                          dbType === engine
-                            ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white'
-                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
-                        }`}
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Engine</label>
+                      <select
+                        value={dbType}
+                        onChange={(e) => handleDbTypeChange(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
                       >
-                        {engine}
-                      </button>
-                    ))}
-                  </div>
+                        <option value="mysql">MySQL Flexible Server</option>
+                        <option value="postgresql">PostgreSQL</option>
+                        <option value="sqlserver">Microsoft SQL Server</option>
+                      </select>
+                    </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Host / Server *</label>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Host / Server</label>
                       <input
                         type="text"
                         value={dbHost}
                         onChange={(e) => setDbHost(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
                       />
                     </div>
+
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Port *</label>
-                      <input
-                        type="number"
-                        value={dbPort}
-                        onChange={(e) => setDbPort(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Database Name *</label>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Database Name</label>
                       <input
                         type="text"
-                        placeholder="analytics_warehouse"
                         value={dbName}
                         onChange={(e) => setDbName(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Target Table Name *</label>
-                      <input
-                        type="text"
-                        placeholder="curated_gold_orders"
-                        value={dbTable}
-                        onChange={(e) => setDbTable(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-emerald-700 dark:text-emerald-400 font-bold focus:outline-none"
-                      />
-                    </div>
-
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Username</label>
                       <input
                         type="text"
                         value={dbUser}
                         onChange={(e) => setDbUser(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
                       />
                     </div>
 
@@ -625,117 +865,126 @@ export const PipelineExecutionView = ({
                       <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Password</label>
                       <input
                         type="password"
-                        placeholder="••••••••"
                         value={dbPassword}
                         onChange={(e) => setDbPassword(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Target Table Name</label>
+                      <input
+                        type="text"
+                        value={dbTable}
+                        onChange={(e) => setDbTable(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-emerald-600 dark:text-emerald-400 font-mono font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Write Mode</label>
+                      <select
+                        value={dbWriteMode}
+                        onChange={(e) => setDbWriteMode(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                      >
+                        <option value="replace">REPLACE (Overwrite Table)</option>
+                        <option value="append">APPEND (Insert Rows)</option>
+                        <option value="fail">FAIL IF EXISTS</option>
+                      </select>
                     </div>
                   </div>
 
-                  <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center space-x-4">
-                      <label className="flex items-center space-x-1.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <div className="flex items-center space-x-4 text-xs text-slate-600 dark:text-slate-400">
+                      <label className="flex items-center space-x-1.5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={createDbIfNotExists}
                           onChange={(e) => setCreateDbIfNotExists(e.target.checked)}
-                          className="rounded text-sky-500"
+                          className="rounded text-sky-600"
                         />
-                        <span>Create Database if not exists</span>
+                        <span>Auto-create Database if not exists</span>
                       </label>
-
-                      <div className="flex items-center space-x-2 text-xs font-semibold">
-                        <span className="text-slate-500">Mode:</span>
-                        <label className="flex items-center space-x-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="wm"
-                            value="replace"
-                            checked={dbWriteMode === 'replace'}
-                            onChange={(e) => setDbWriteMode(e.target.value)}
-                          />
-                          <span>Replace Table</span>
-                        </label>
-                        <label className="flex items-center space-x-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="wm"
-                            value="append"
-                            checked={dbWriteMode === 'append'}
-                            onChange={(e) => setDbWriteMode(e.target.value)}
-                          />
-                          <span>Append Rows</span>
-                        </label>
-                      </div>
                     </div>
 
                     <button
                       type="button"
                       onClick={handleTestDestination}
                       disabled={testingDest}
-                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5"
+                      className="px-3.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition-colors disabled:opacity-50"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin' : ''}`} />
-                      <span>{testingDest ? 'Testing...' : 'Test Target Connection'}</span>
+                      <Zap className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin text-amber-500' : 'text-amber-500'}`} />
+                      <span>{testingDest ? 'Testing Destination...' : 'Test Destination Connection'}</span>
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Destination Form: AWS S3 */}
               {destinationType === 's3' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">S3 Bucket *</label>
-                    <input
-                      type="text"
-                      value={s3Bucket}
-                      onChange={(e) => setS3Bucket(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Key Prefix / Path *</label>
-                    <input
-                      type="text"
-                      value={s3Key}
-                      onChange={(e) => setS3Key(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
-                    />
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">S3 Bucket</label>
+                      <input
+                        type="text"
+                        value={s3Bucket}
+                        onChange={(e) => setS3Bucket(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Object Key Prefix</label>
+                      <input
+                        type="text"
+                        value={s3Key}
+                        onChange={(e) => setS3Key(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">AWS Region</label>
+                      <input
+                        type="text"
+                        value={s3Region}
+                        onChange={(e) => setS3Region(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Destination Form: Azure ADLS */}
               {destinationType === 'azure' && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Storage Account *</label>
-                    <input
-                      type="text"
-                      value={azureAccount}
-                      onChange={(e) => setAzureAccount(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Container *</label>
-                    <input
-                      type="text"
-                      value={azureContainer}
-                      onChange={(e) => setAzureContainer(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Blob Path *</label>
-                    <input
-                      type="text"
-                      value={azurePath}
-                      onChange={(e) => setAzurePath(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
-                    />
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Storage Account</label>
+                      <input
+                        type="text"
+                        value={azureAccount}
+                        onChange={(e) => setAzureAccount(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Blob Container</label>
+                      <input
+                        type="text"
+                        value={azureContainer}
+                        onChange={(e) => setAzureContainer(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Blob Path</label>
+                      <input
+                        type="text"
+                        value={azurePath}
+                        onChange={(e) => setAzurePath(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -765,16 +1014,16 @@ export const PipelineExecutionView = ({
               <button
                 type="button"
                 onClick={handleRunPipeline}
-                disabled={executing || !pipelineName.trim()}
+                disabled={executing || !pipelineName.trim() || !effectiveDataset}
                 className="w-full sm:w-auto justify-center px-6 py-3 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-2 shadow-md transition-all disabled:opacity-50"
               >
                 <PlayCircle className={`w-4 h-4 ${executing ? 'animate-spin' : ''}`} />
-                <span>{executing ? 'Executing Spark DAG...' : 'Run Pipeline & Load Destination'}</span>
+                <span>{executing ? 'Executing Spark DAG & Loading Target...' : 'Run Pipeline & Load Destination'}</span>
               </button>
             </div>
           </div>
 
-          {/* Bottom Full-Width Section: Live Terminal Logs & Execution Monitor */}
+          {/* Live Terminal Logs & Execution Monitor */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm space-y-3 transition-colors">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
@@ -838,7 +1087,7 @@ export const PipelineExecutionView = ({
               </div>
             )}
 
-            {/* Expansive Full-Width Terminal Log Viewer */}
+            {/* Terminal Log Viewer */}
             <div className="bg-slate-950 rounded-xl p-4 font-mono text-xs text-slate-300 space-y-1.5 min-h-[220px] max-h-[350px] overflow-y-auto border border-slate-800">
               {activeJob && activeJob.logs && activeJob.logs.length > 0 ? (
                 activeJob.logs.map((log, i) => {
@@ -857,7 +1106,7 @@ export const PipelineExecutionView = ({
               ) : (
                 <div className="text-center py-14 text-slate-500 space-y-1">
                   <p className="font-semibold text-slate-400">Terminal Idle: Ready to Execute</p>
-                  <p className="text-[11px]">Configure your target export destination above and click <strong>"Run Pipeline & Load Destination"</strong>.</p>
+                  <p className="text-[11px]">Select a Flow above, configure your destination, and click <strong>"Run Pipeline & Load Destination"</strong>.</p>
                 </div>
               )}
             </div>
@@ -866,7 +1115,7 @@ export const PipelineExecutionView = ({
       )}
 
       {/* ==========================================
-          TAB 2: SAVED PIPELINE EXECUTIONS HUB
+          TAB 2: EXECUTED PIPELINES HISTORY HUB
           ========================================== */}
       {viewMode === 'history' && (
         <div className="space-y-4">
@@ -881,14 +1130,14 @@ export const PipelineExecutionView = ({
             </div>
 
             {jobHistory.length > 0 && (
-              <div className="relative">
+              <div className="relative w-full sm:w-auto">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Search pipelines..."
                   value={historySearchTerm}
                   onChange={(e) => setHistorySearchTerm(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-48"
+                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-full sm:w-48 font-sans"
                 />
               </div>
             )}
@@ -939,6 +1188,168 @@ export const PipelineExecutionView = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* FLOW DETAILS MODAL */}
+      {viewingFlowDetails && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 text-slate-900 dark:text-slate-100 max-h-[85vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/20">
+                  <GitBranch className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
+                      {viewingFlowDetails.category || 'General'}
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 uppercase font-bold">
+                      {viewingFlowDetails.status || 'Active'}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                    {viewingFlowDetails.name}
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewingFlowDetails(null)}
+                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Description & Metadata Grid */}
+            <div className="space-y-3">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                {viewingFlowDetails.description || 'No detailed flow description provided.'}
+              </p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">FLOW ID</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">{viewingFlowDetails.id}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">CREATED</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                    {viewingFlowDetails.created_at ? new Date(viewingFlowDetails.created_at).toLocaleDateString() : 'Initial'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">DATASETS</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
+                    {viewingFlowDetails.dataset_count || 0} Attached
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">SAVED RULES</span>
+                  <span className="font-bold text-sky-600 dark:text-sky-400 block">
+                    {Array.isArray(viewingFlowDetails.rules) ? viewingFlowDetails.rules.length : 0} Rules
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Attached Staged Datasets Section */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center space-x-1.5">
+                <HardDrive className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Attached Staged Datasets</span>
+              </h4>
+
+              {allStagedDatasets.filter((d) => d.flow_id === viewingFlowDetails.id).length === 0 ? (
+                <p className="text-xs text-slate-400 font-mono p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                  No staged datasets attached to this flow yet.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {allStagedDatasets
+                    .filter((d) => d.flow_id === viewingFlowDetails.id)
+                    .map((ds) => (
+                      <div
+                        key={ds.id}
+                        className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-mono"
+                      >
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white">{ds.name}</span>
+                          <span className="text-[10px] text-slate-400 ml-2">({ds.source_type})</span>
+                        </div>
+                        <div className="text-slate-500 dark:text-slate-400">
+                          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{ds.row_count?.toLocaleString()}</strong> rows • {ds.column_count} cols
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            {/* Configured Spark Transformation Rules Section */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center space-x-1.5">
+                <Sliders className="w-3.5 h-3.5 text-sky-500" />
+                <span>Configured Transformation Rules ({Array.isArray(viewingFlowDetails.rules) ? viewingFlowDetails.rules.length : 0})</span>
+              </h4>
+
+              {(!viewingFlowDetails.rules || viewingFlowDetails.rules.length === 0) ? (
+                <p className="text-xs text-slate-400 font-mono p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                  No transformation rules configured for this flow yet.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {viewingFlowDetails.rules.map((rule, rIdx) => (
+                    <div
+                      key={rule.id || rIdx}
+                      className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 uppercase">
+                          {rule.rule_type}
+                        </span>
+                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                          {rule.description || rule.params?.condition || rule.params?.column_name || 'Step'}
+                        </span>
+                      </div>
+                      <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                        rule.enabled !== false ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-slate-400 bg-slate-100 dark:bg-slate-800'
+                      }`}>
+                        {rule.enabled !== false ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Action Buttons */}
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setViewingFlowDetails(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-colors"
+              >
+                Close
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleFlowChange(viewingFlowDetails.id);
+                  setViewingFlowDetails(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-sm transition-all"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Select & Load This Flow</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
