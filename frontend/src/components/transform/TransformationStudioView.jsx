@@ -52,14 +52,25 @@ export const TransformationStudioView = ({
   const [savingRules, setSavingRules] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(null);
 
+  const [selectedFlowFilter, setSelectedFlowFilter] = useState('all');
+
   // Helper to always resolve a valid target flow ID
   const resolveTargetFlowId = () => {
-    return activeDataset?.flow_id || activeFlowId || (flows && flows[0]?.id) || null;
+    return activeDataset?.flow_id || (activeFlowId !== 'all' ? activeFlowId : null) || (flows && flows[0]?.id) || null;
   };
 
   // Determine current effective flow
   const currentFlowId = resolveTargetFlowId();
-  const currentFlow = flows.find((f) => f.id === currentFlowId) || { id: currentFlowId || '', name: currentFlowId ? `Flow ${currentFlowId}` : 'No Flow Selected' };
+  const currentFlow = flows.find((f) => f.id === currentFlowId) || { id: currentFlowId || '', name: currentFlowId ? `Flow ${currentFlowId}` : 'General Flow' };
+
+  // Sync flow filter with activeFlowId prop
+  useEffect(() => {
+    if (activeFlowId && activeFlowId !== 'all') {
+      setSelectedFlowFilter(activeFlowId);
+    } else {
+      setSelectedFlowFilter('all');
+    }
+  }, [activeFlowId]);
 
   // Load flow rules when dataset or flow changes
   useEffect(() => {
@@ -246,8 +257,8 @@ export const TransformationStudioView = ({
     setSaveSuccessMsg(null);
     try {
       await DataFlowAPI.saveFlowRules(targetFlowId, rules);
-      setSaveSuccessMsg(`Saved ${rules.length} transformation rule${rules.length === 1 ? '' : 's'} to Flow "${currentFlow?.name || targetFlowId}"`);
-      setTimeout(() => setSaveSuccessMsg(null), 4000);
+      setSaveSuccessMsg(`Saved ${rules.length} rules to flow '${currentFlow.name}'!`);
+      setTimeout(() => setSaveSuccessMsg(null), 3500);
     } catch (err) {
       setErrorMsg(err?.response?.data?.detail || err.message || 'Failed to save rules to flow');
     } finally {
@@ -260,11 +271,8 @@ export const TransformationStudioView = ({
     setPreviewLoading(true);
     setErrorMsg(null);
     try {
-      const res = await DataFlowAPI.previewTransformation({
-        staging_dataset_id: activeDataset.id,
-        rules: rules.filter((r) => r.enabled),
-        limit: 25,
-      });
+      const activeOnly = rules.filter((r) => r.enabled);
+      const res = await DataFlowAPI.previewTransform(activeDataset.id, activeOnly);
       setPreviewResult(res);
     } catch (err) {
       setErrorMsg(err?.response?.data?.detail || err.message || 'Transformation preview failed');
@@ -287,10 +295,22 @@ export const TransformationStudioView = ({
   };
 
   const filteredStages = allDatasets.filter((ds) => {
+    if (selectedFlowFilter !== 'all' && ds.flow_id !== selectedFlowFilter) {
+      return false;
+    }
     if (!searchStage.trim()) return true;
     const term = searchStage.toLowerCase();
-    return ds.name.toLowerCase().includes(term) || ds.id.toLowerCase().includes(term);
+    const flowObj = flows.find((f) => f.id === ds.flow_id);
+    const flowName = flowObj ? flowObj.name.toLowerCase() : '';
+    return ds.name.toLowerCase().includes(term) || 
+           ds.id.toLowerCase().includes(term) ||
+           flowName.includes(term);
   });
+
+  const getFlowDatasetCount = (flowId) => {
+    if (flowId === 'all') return allDatasets.length;
+    return allDatasets.filter((d) => d.flow_id === flowId).length;
+  };
 
   // ==========================================
   // VIEW: STAGES GALLERY SELECTION
@@ -298,6 +318,7 @@ export const TransformationStudioView = ({
   if (!activeDataset) {
     return (
       <div className="space-y-6 animate-fadeIn">
+        {/* Top Header Card */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 rounded-lg bg-sky-50 dark:bg-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center border border-sky-200 dark:border-sky-500/30 shrink-0">
@@ -308,7 +329,7 @@ export const TransformationStudioView = ({
                 Select Staged Dataset to Transform
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Choose a Lakehouse staged dataset to build and edit Apache Spark DAG rules.
+                {allDatasets.length} dataset{allDatasets.length === 1 ? '' : 's'} across {flows.length} flows ready for PySpark transformations.
               </p>
             </div>
           </div>
@@ -318,7 +339,7 @@ export const TransformationStudioView = ({
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search stages..."
+                placeholder="Search stages or flows..."
                 value={searchStage}
                 onChange={(e) => setSearchStage(e.target.value)}
                 className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-full sm:w-52 font-sans"
@@ -327,12 +348,71 @@ export const TransformationStudioView = ({
           )}
         </div>
 
-        {allDatasets.length === 0 ? (
+        {/* FLOW SELECTOR TABS BAR */}
+        {flows.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedFlowFilter('all');
+                onSelectFlow && onSelectFlow('all');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 ${
+                selectedFlowFilter === 'all'
+                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
+              }`}
+            >
+              <span>⚡ All Flows</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                selectedFlowFilter === 'all'
+                  ? 'bg-slate-700 text-slate-200 dark:bg-slate-200 dark:text-slate-800'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+              }`}>
+                {getFlowDatasetCount('all')}
+              </span>
+            </button>
+
+            {flows.map((flow) => {
+              const isSelected = selectedFlowFilter === flow.id;
+              const count = getFlowDatasetCount(flow.id);
+              return (
+                <button
+                  key={flow.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedFlowFilter(flow.id);
+                    onSelectFlow && onSelectFlow(flow.id);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                  }`}
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <span>{flow.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {filteredStages.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-12 text-center text-slate-500 dark:text-slate-400 text-xs space-y-3">
             <FolderOpen className="w-10 h-10 text-slate-400 mx-auto mb-1" />
-            <h3 className="text-sm font-bold text-slate-800 dark:text-white">No Staged Sets Found</h3>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-white">
+              {allDatasets.length === 0 ? 'No Staged Sets Found' : 'No Staged Datasets In This Flow'}
+            </h3>
             <p className="max-w-sm mx-auto text-slate-400">
-              You haven't staged any data yet. Please connect a data source and stage it in the Staging Area.
+              {allDatasets.length === 0
+                ? "You haven't staged any data yet. Please connect a data source and stage it in the Staging Area."
+                : "This flow does not have any staged datasets yet. Switch flow or connect a source."}
             </p>
             <button
               type="button"
@@ -345,14 +425,33 @@ export const TransformationStudioView = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredStages.map((ds) => (
-              <div
-                key={ds.id}
-                onClick={() => handleSelectStage(ds)}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-900 dark:hover:border-sky-500 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4"
-              >
-                <div>
-                  <div className="flex items-start justify-between">
+            {filteredStages.map((ds) => {
+              const flowObj = flows.find((f) => f.id === ds.flow_id);
+              return (
+                <div
+                  key={ds.id}
+                  onClick={() => handleSelectStage(ds)}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-900 dark:hover:border-sky-500 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4"
+                >
+                  <div>
+                    {/* Top Badges: Flow Badge & Source Type */}
+                    <div className="flex items-center justify-between gap-1 mb-2">
+                      {flowObj ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20 truncate max-w-[170px]">
+                          <GitBranch className="w-3 h-3 text-indigo-500 shrink-0" />
+                          <span className="truncate">{flowObj.name}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                          General
+                        </span>
+                      )}
+
+                      <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 shrink-0">
+                        {ds.source_type}
+                      </span>
+                    </div>
+
                     <div className="flex items-center space-x-2 min-w-0 pr-1">
                       <div className="w-7 h-7 rounded-lg bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center border border-sky-200 dark:border-sky-500/20 shrink-0">
                         <Sliders className="w-3.5 h-3.5" />
@@ -362,30 +461,26 @@ export const TransformationStudioView = ({
                       </span>
                     </div>
 
-                    <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 shrink-0">
-                      {ds.source_type}
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                      {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 space-x-2">
+                      <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{ds.row_count.toLocaleString()}</strong> rows
+                      <span>•</span>
+                      <span>{ds.column_count} cols</span>
+                    </div>
+
+                    <span className="text-xs font-bold text-slate-900 dark:text-sky-400 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
+                      <span>Build Rules</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </span>
                   </div>
-
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
-                    {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
-                  </p>
                 </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 space-x-2">
-                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{ds.row_count.toLocaleString()}</strong> rows
-                    <span>•</span>
-                    <span>{ds.column_count} cols</span>
-                  </div>
-
-                  <span className="text-xs font-bold text-slate-900 dark:text-sky-400 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
-                    <span>Build Rules</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

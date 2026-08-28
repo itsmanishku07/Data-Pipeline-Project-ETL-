@@ -174,16 +174,12 @@ export const App = () => {
       const flowList = await DataFlowAPI.listFlows();
       setFlows(flowList);
       
-      let effectiveFlow = activeFlowId;
-      if (flowList.length > 0) {
-        const found = flowList.find((f) => f.id === activeFlowId);
-        if (!found) {
-          effectiveFlow = flowList[0].id;
-          setActiveFlowId(effectiveFlow);
-        }
+      if (!activeFlowId && flowList.length > 0) {
+        setActiveFlowId('all');
       }
 
-      const list = await DataFlowAPI.listStagedDatasets(effectiveFlow);
+      // Fetch all staged datasets across all flows
+      const list = await DataFlowAPI.listStagedDatasets(null);
       setAllStagedDatasets(list);
 
       const savedDsId = localStorage.getItem('dataflow_active_dataset_id');
@@ -209,10 +205,16 @@ export const App = () => {
   const handleFlowSelect = async (flowId) => {
     setActiveFlowId(flowId);
     try {
-      const list = await DataFlowAPI.listStagedDatasets(flowId);
+      // Maintain full list of all datasets across all flows
+      const list = await DataFlowAPI.listStagedDatasets(null);
       setAllStagedDatasets(list);
       if (list.length > 0) {
-        setActiveStagedDataset(list[0]);
+        if (flowId && flowId !== 'all') {
+          const flowMatch = list.find((d) => d.flow_id === flowId);
+          setActiveStagedDataset(flowMatch || list[0]);
+        } else {
+          setActiveStagedDataset(list[0]);
+        }
       } else {
         setActiveStagedDataset(null);
       }
@@ -335,6 +337,8 @@ export const App = () => {
             <StagingAreaView
               initialDatasetId={activeStagedDataset?.id}
               activeFlowId={activeFlowId}
+              flows={flows}
+              allDatasets={allStagedDatasets}
               onSelectFlow={handleFlowSelect}
               onSelectDatasetForTransform={handleSelectDatasetForTransform}
               onAddNewSource={() => goToStep(1)}

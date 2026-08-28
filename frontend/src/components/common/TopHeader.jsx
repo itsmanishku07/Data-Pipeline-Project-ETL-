@@ -76,10 +76,13 @@ export const TopHeader = ({
             <GitBranch className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
             <span className="hidden md:inline text-slate-400 text-[10px] uppercase font-semibold">Flow:</span>
             <select
-              value={activeFlowId || (flows[0]?.id || '')}
+              value={activeFlowId || 'all'}
               onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
               className="bg-transparent text-[11px] sm:text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer max-w-[110px] sm:max-w-[160px] truncate"
             >
+              <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold">
+                All Flows ({flows.length})
+              </option>
               {flows.map((f) => (
                 <option key={f.id} value={f.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                   {f.name}
