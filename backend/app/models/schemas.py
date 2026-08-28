@@ -206,6 +206,8 @@ class TransformPreviewResult(BaseModel):
     execution_time_ms: float
     spark_plan: Optional[str] = None
     step_summaries: List[Dict[str, Any]] = []
+    generated_pyspark_code: Optional[str] = None
+    generated_sql_query: Optional[str] = None
 
 # Destination Export Engine Models
 class DestinationTypeEnum(str, Enum):

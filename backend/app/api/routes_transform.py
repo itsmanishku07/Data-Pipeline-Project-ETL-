@@ -50,14 +50,20 @@ def preview_transformation(request: PreviewTransformRequest, background_tasks: B
             execution_time_ms=exec_time
         )
 
+        ds_name = meta.get("name", request.staging_dataset_id)
+        pyspark_code = TransformationEngine.generate_pyspark_code(ds_name, request.rules)
+        sql_query = TransformationEngine.generate_sql_code(ds_name, request.rules)
+
         return TransformPreviewResult(
             initial_rows=initial_rows,
             transformed_rows=len(df_transformed),
             columns=column_profiles,
             preview_rows=preview_rows,
             execution_time_ms=exec_time,
-            spark_plan="Physical Plan: Spark Scan -> Filter -> Project -> HashAggregate -> Output",
-            step_summaries=step_summaries
+            spark_plan="Physical Plan: Spark Scan -> HashAggregate / Join -> Filter -> Project -> Materialize",
+            step_summaries=step_summaries,
+            generated_pyspark_code=pyspark_code,
+            generated_sql_query=sql_query
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Transformation execution error: {str(e)}")

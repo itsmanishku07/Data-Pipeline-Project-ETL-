@@ -206,6 +206,19 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  previewTransform: async (stagingDatasetIdOrReq, rules = [], limit = 50) => {
+    if (typeof stagingDatasetIdOrReq === 'object' && stagingDatasetIdOrReq !== null) {
+      const res = await api.post('/transform/preview', stagingDatasetIdOrReq);
+      return res.data;
+    }
+    const res = await api.post('/transform/preview', {
+      staging_dataset_id: stagingDatasetIdOrReq,
+      rules: rules,
+      limit: limit,
+    });
+    return res.data;
+  },
+
   executePipeline: async (req) => {
     const res = await api.post('/transform/execute', req);
     invalidateDataFlowCache('staging');
