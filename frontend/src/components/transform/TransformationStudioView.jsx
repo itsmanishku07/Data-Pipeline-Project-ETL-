@@ -598,7 +598,7 @@ export const TransformationStudioView = ({
   // VIEW: RULE STUDIO & LIVE PREVIEW
   // ==========================================
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6 animate-fadeIn pb-20 sm:pb-8">
       {/* Top Header Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm transition-colors">
         <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
@@ -986,11 +986,11 @@ export const TransformationStudioView = ({
             {rules.length === 0 ? (
               <p className="text-xs text-slate-400 py-4 text-center font-mono">No transformation rules configured yet.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {rules.map((rule, idx) => (
                   <div
                     key={rule.id}
-                    className={`p-2.5 rounded-lg border text-xs flex items-center justify-between transition-all ${
+                    className={`p-3 rounded-xl border text-xs transition-all space-y-2 ${
                       editingRuleId === rule.id
                         ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/40 ring-1 ring-amber-400'
                         : rule.enabled
@@ -998,77 +998,80 @@ export const TransformationStudioView = ({
                           : 'bg-slate-100/50 dark:bg-slate-950/30 border-dashed border-slate-300 dark:border-slate-800/60 opacity-60'
                     }`}
                   >
-                    <div className="flex items-center space-x-2 min-w-0 pr-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <span className="font-mono text-[10px] uppercase font-bold text-sky-600 dark:text-sky-400 block">
+                    {/* Top Row: Step badge, Type, and Actions */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-1.5 min-w-0">
+                        <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="font-mono text-[10px] uppercase font-bold text-sky-600 dark:text-sky-400 px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-500/10 border border-sky-200/50 dark:border-sky-500/20 shrink-0">
                           {rule.rule_type}
                         </span>
-                        <p className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate">
-                          {rule.description}
-                        </p>
+                      </div>
+
+                      <div className="flex items-center space-x-1 shrink-0">
+                        {/* Reorder Buttons */}
+                        <button
+                          type="button"
+                          onClick={() => handleMoveRule(idx, -1)}
+                          disabled={idx === 0}
+                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors"
+                          title="Move Up"
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleMoveRule(idx, 1)}
+                          disabled={idx === rules.length - 1}
+                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors"
+                          title="Move Down"
+                        >
+                          <ArrowDown className="w-3 h-3" />
+                        </button>
+
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(rule)}
+                          className={`p-1 transition-colors ${
+                            editingRuleId === rule.id ? 'text-amber-600' : 'text-slate-400 hover:text-amber-600'
+                          }`}
+                          title="Edit Rule"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+
+                        {/* Toggle On/Off */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggle(idx)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase transition-colors ${
+                            rule.enabled
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          {rule.enabled ? 'ON' : 'OFF'}
+                        </button>
+
+                        {/* Delete */}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(idx)}
+                          className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+                          title="Delete Rule"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center space-x-1 shrink-0">
-                      {/* Reorder Buttons */}
-                      <button
-                        type="button"
-                        onClick={() => handleMoveRule(idx, -1)}
-                        disabled={idx === 0}
-                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors"
-                        title="Move Up"
-                      >
-                        <ArrowUp className="w-3 h-3" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleMoveRule(idx, 1)}
-                        disabled={idx === rules.length - 1}
-                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors"
-                        title="Move Down"
-                      >
-                        <ArrowDown className="w-3 h-3" />
-                      </button>
-
-                      {/* Edit Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleStartEdit(rule)}
-                        className={`p-1 transition-colors ${
-                          editingRuleId === rule.id ? 'text-amber-600' : 'text-slate-400 hover:text-amber-600'
-                        }`}
-                        title="Edit Rule"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-
-                      {/* Toggle On/Off */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggle(idx)}
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                          rule.enabled
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                            : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                        }`}
-                      >
-                        {rule.enabled ? 'ON' : 'OFF'}
-                      </button>
-
-                      {/* Delete */}
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(idx)}
-                        className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
-                        title="Delete Rule"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {/* Bottom Row: Full readable description */}
+                    <p className="font-mono text-xs text-slate-800 dark:text-slate-200 break-words pl-6">
+                      {rule.description}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -1079,12 +1082,12 @@ export const TransformationStudioView = ({
         {/* Right Column: Live Data Preview & Code Inspector */}
         <div className="lg:col-span-7 space-y-3">
           {/* Top Inspector Tab Selector */}
-          <div className="flex items-center justify-between bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-sm">
-            <div className="flex items-center space-x-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-sm">
+            <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full sm:w-auto -webkit-overflow-scrolling-touch">
               <button
                 type="button"
                 onClick={() => setActivePreviewTab('data')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
                   activePreviewTab === 'data'
                     ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1102,7 +1105,7 @@ export const TransformationStudioView = ({
               <button
                 type="button"
                 onClick={() => setActivePreviewTab('pyspark')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
                   activePreviewTab === 'pyspark'
                     ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1115,7 +1118,7 @@ export const TransformationStudioView = ({
               <button
                 type="button"
                 onClick={() => setActivePreviewTab('sql')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
                   activePreviewTab === 'sql'
                     ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1129,7 +1132,7 @@ export const TransformationStudioView = ({
                 <button
                   type="button"
                   onClick={() => setActivePreviewTab('plan')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
                     activePreviewTab === 'plan'
                       ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1149,19 +1152,13 @@ export const TransformationStudioView = ({
                   activePreviewTab === 'pyspark' ? getDynamicPySparkCode() : getDynamicSqlCode(),
                   activePreviewTab
                 )}
-                className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center space-x-1 transition-colors"
-                title="Copy code to clipboard"
+                className="self-end sm:self-auto p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center justify-center transition-colors shrink-0"
+                title={copiedType === activePreviewTab ? "Copied!" : `Copy ${activePreviewTab === 'pyspark' ? 'PySpark' : 'SQL'} code`}
               >
                 {copiedType === activePreviewTab ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="text-emerald-600 dark:text-emerald-400">Copied!</span>
-                  </>
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
                 ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy {activePreviewTab === 'pyspark' ? 'PySpark' : 'SQL'}</span>
-                  </>
+                  <Copy className="w-3.5 h-3.5" />
                 )}
               </button>
             )}
@@ -1171,10 +1168,19 @@ export const TransformationStudioView = ({
           {activePreviewTab === 'data' && (
             previewResult ? (
               <div className="space-y-3 animate-fadeIn">
-                <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 rounded-xl p-3 flex items-center justify-between text-xs font-mono text-emerald-800 dark:text-emerald-300">
-                  <span>Execution Time: <strong>{previewResult.execution_time_ms.toFixed(1)} ms</strong></span>
-                  <span>Rows: <strong>{previewResult.initial_rows.toLocaleString()} → {previewResult.transformed_rows.toLocaleString()}</strong></span>
-                  <span>Columns: <strong>{previewResult.columns.length}</strong></span>
+                <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 rounded-xl p-2.5 sm:p-3 grid grid-cols-3 gap-2 text-center sm:flex sm:items-center sm:justify-between text-[11px] sm:text-xs font-mono text-emerald-800 dark:text-emerald-300">
+                  <div className="bg-white/60 dark:bg-slate-900/60 p-1.5 sm:p-0 rounded-lg sm:bg-transparent sm:dark:bg-transparent">
+                    <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 block sm:inline sm:mr-1">Time:</span>
+                    <strong>{previewResult.execution_time_ms.toFixed(1)}ms</strong>
+                  </div>
+                  <div className="bg-white/60 dark:bg-slate-900/60 p-1.5 sm:p-0 rounded-lg sm:bg-transparent sm:dark:bg-transparent">
+                    <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 block sm:inline sm:mr-1">Rows:</span>
+                    <strong>{previewResult.initial_rows.toLocaleString()} → {previewResult.transformed_rows.toLocaleString()}</strong>
+                  </div>
+                  <div className="bg-white/60 dark:bg-slate-900/60 p-1.5 sm:p-0 rounded-lg sm:bg-transparent sm:dark:bg-transparent">
+                    <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 block sm:inline sm:mr-1">Cols:</span>
+                    <strong>{previewResult.columns.length}</strong>
+                  </div>
                 </div>
 
                 <DataGrid
@@ -1206,9 +1212,14 @@ export const TransformationStudioView = ({
                   <Code2 className="w-3.5 h-3.5" />
                   <span>pipeline_transform.py (Apache PySpark)</span>
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {rules.filter((r) => r.enabled).length} DAG Steps
-                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(getDynamicPySparkCode(), 'pyspark')}
+                  className="p-1 rounded-md text-slate-400 hover:text-white transition-colors"
+                  title="Copy PySpark code"
+                >
+                  {copiedType === 'pyspark' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
               </div>
               <pre className="p-4 text-xs font-mono text-slate-200 overflow-x-auto max-h-[500px] leading-relaxed select-all">
                 <code>{getDynamicPySparkCode()}</code>
@@ -1224,9 +1235,14 @@ export const TransformationStudioView = ({
                   <Terminal className="w-3.5 h-3.5" />
                   <span>transformation_query.sql (Spark SQL / DuckDB)</span>
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  ANSI SQL WITH CTEs
-                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(getDynamicSqlCode(), 'sql')}
+                  className="p-1 rounded-md text-slate-400 hover:text-white transition-colors"
+                  title="Copy SQL query"
+                >
+                  {copiedType === 'sql' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
               </div>
               <pre className="p-4 text-xs font-mono text-sky-300 overflow-x-auto max-h-[500px] leading-relaxed select-all">
                 <code>{getDynamicSqlCode()}</code>
