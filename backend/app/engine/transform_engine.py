@@ -170,6 +170,38 @@ class TransformationEngine:
                 df = con.execute(query).df()
                 con.close()
 
+        elif rtype == RuleType.WINDOW_FUNCTION:
+            func_type = (params.get("function_type") or "row_number").upper()
+            target_col = params.get("target_column") or f"{func_type.lower()}_col"
+            val_col = params.get("value_column")
+            partition_by = params.get("partition_by", [])
+            order_by = params.get("order_by", "")
+            order_dir = (params.get("order_direction") or "ASC").upper()
+            offset = params.get("offset", 1)
+
+            if func_type in ["ROW_NUMBER", "RANK", "DENSE_RANK"]:
+                func_expr = f"{func_type}()"
+            elif func_type in ["LEAD", "LAG"]:
+                func_expr = f"{func_type}(\"{val_col}\", {offset})" if val_col else f"{func_type}(1)"
+            elif func_type in ["SUM", "AVG", "MIN", "MAX", "FIRST_VALUE", "LAST_VALUE"]:
+                func_expr = f"{func_type}(\"{val_col}\")" if val_col else "COUNT(*)"
+            else:
+                func_expr = "ROW_NUMBER()"
+
+            over_parts = []
+            if partition_by:
+                over_parts.append(f"PARTITION BY {', '.join([f'\"{c}\"' for c in partition_by])}")
+            if order_by:
+                over_parts.append(f"ORDER BY \"{order_by}\" {order_dir}")
+
+            over_clause = f"OVER ({' '.join(over_parts)})"
+            query = f"SELECT *, {func_expr} {over_clause} AS \"{target_col}\" FROM current_df"
+
+            con = duckdb.connect(":memory:")
+            con.register("current_df", df)
+            df = con.execute(query).df()
+            con.close()
+
         elif rtype == RuleType.DEDUPLICATE:
             cols = params.get("columns", [])
             cols_exist = [c for c in cols if c in df.columns] if cols else None
@@ -296,6 +328,60 @@ class TransformationEngine:
                 elif rtype == RuleType.SELECT_COLUMNS:
                     cols = p.get("columns", [])
                     lines.append(f"df = df.select({', '.join([repr(c) for c in cols])})")
+                elif rtype == RuleType.AGGREGATE:
+                    group_by = p.get("group_by", [])
+                    aggs = p.get("aggregations", [])
+                    grp_str = ", ".join([f"'{c}'" for c in group_by])
+                    agg_calls = []
+                    for a in aggs:
+                        col = a.get("column", "col")
+                        op = (a.get("op") or "sum").lower()
+                        alias = a.get("alias") or f"{op}_{col}"
+                        if op == "count_distinct":
+                            agg_calls.append(f"F.countDistinct('{col}').alias('{alias}')")
+                        elif op == "stddev":
+                            agg_calls.append(f"F.stddev('{col}').alias('{alias}')")
+                        else:
+                            agg_calls.append(f"F.{op}('{col}').alias('{alias}')")
+                    if grp_str:
+                        lines.append(f"df = df.groupBy({grp_str}).agg({', '.join(agg_calls)})")
+                    else:
+                        lines.append(f"df = df.agg({', '.join(agg_calls)})")
+                elif rtype == RuleType.WINDOW_FUNCTION:
+                    func_type = (p.get("function_type") or "row_number").lower()
+                    target_col = p.get("target_column") or f"{func_type}_col"
+                    val_col = p.get("value_column")
+                    partition_by = p.get("partition_by", [])
+                    order_by = p.get("order_by", "")
+                    order_dir = (p.get("order_direction") or "asc").lower()
+                    offset = p.get("offset", 1)
+
+                    win_parts = []
+                    if partition_by:
+                        part_cols = ", ".join([f"'{c}'" for c in partition_by])
+                        win_parts.append(f"Window.partitionBy({part_cols})")
+                    else:
+                        win_parts.append("Window")
+                    if order_by:
+                        win_parts.append(f"orderBy(F.col('{order_by}').{order_dir}())")
+
+                    win_spec = ".".join(win_parts)
+                    if not partition_by and not order_by:
+                        win_spec = "Window.partitionBy()"
+
+                    if func_type == "row_number":
+                        call_expr = f"F.row_number().over({win_spec})"
+                    elif func_type == "rank":
+                        call_expr = f"F.rank().over({win_spec})"
+                    elif func_type == "dense_rank":
+                        call_expr = f"F.dense_rank().over({win_spec})"
+                    elif func_type in ["lead", "lag"]:
+                        call_expr = f"F.{func_type}('{val_col}', {offset}).over({win_spec})"
+                    else:
+                        call_expr = f"F.{func_type}('{val_col}').over({win_spec})"
+
+                    lines.append("from pyspark.sql.window import Window")
+                    lines.append(f"df = df.withColumn('{target_col}', {call_expr})")
                 elif rtype == RuleType.JOIN:
                     target_id = p.get("target_dataset_id", "target_table")
                     left_on = p.get("left_on", "key")
@@ -353,6 +439,52 @@ class TransformationEngine:
                 old_c = p.get("old_name", "old_col")
                 new_c = p.get("new_name", "new_col")
                 ctes.append(f"{cte_name} AS (\n    SELECT *, {old_c} AS {new_c}\n    FROM {prev_table}\n)")
+            elif rtype == RuleType.SELECT_COLUMNS:
+                cols = p.get("columns", [])
+                cols_str = ", ".join([f'"{c}"' for c in cols]) if cols else "*"
+                ctes.append(f"{cte_name} AS (\n    SELECT {cols_str}\n    FROM {prev_table}\n)")
+            elif rtype == RuleType.DROP_COLUMNS:
+                cols = p.get("columns", [])
+                exclude_str = f" EXCLUDE ({', '.join([f'\"{c}\"' for c in cols])})" if cols else ""
+                ctes.append(f"{cte_name} AS (\n    SELECT *{exclude_str}\n    FROM {prev_table}\n)")
+            elif rtype == RuleType.AGGREGATE:
+                group_by = p.get("group_by", [])
+                aggs = p.get("aggregations", [])
+                select_parts = [f'"{c}"' for c in group_by]
+                for a in aggs:
+                    col = a.get("column", "col")
+                    op = (a.get("op") or "SUM").upper()
+                    alias = a.get("alias") or f"{op.lower()}_{col}"
+                    if op == "COUNT_DISTINCT":
+                        select_parts.append(f'COUNT(DISTINCT "{col}") AS "{alias}"')
+                    else:
+                        select_parts.append(f'{op}("{col}") AS "{alias}"')
+                grp_clause = f" GROUP BY {', '.join([f'\"{c}\"' for c in group_by])}" if group_by else ""
+                ctes.append(f"{cte_name} AS (\n    SELECT {', '.join(select_parts)} FROM {prev_table}{grp_clause}\n)")
+            elif rtype == RuleType.WINDOW_FUNCTION:
+                func_type = (p.get("function_type") or "ROW_NUMBER").upper()
+                target_col = p.get("target_column") or f"{func_type.lower()}_col"
+                val_col = p.get("value_column")
+                partition_by = p.get("partition_by", [])
+                order_by = p.get("order_by", "")
+                order_dir = (p.get("order_direction") or "ASC").upper()
+                offset = p.get("offset", 1)
+
+                if func_type in ["ROW_NUMBER", "RANK", "DENSE_RANK"]:
+                    f_expr = f"{func_type}()"
+                elif func_type in ["LEAD", "LAG"]:
+                    f_expr = f'{func_type}("{val_col}", {offset})' if val_col else f"{func_type}(1)"
+                else:
+                    f_expr = f'{func_type}("{val_col}")' if val_col else "COUNT(*)"
+
+                over_parts = []
+                if partition_by:
+                    over_parts.append(f"PARTITION BY {', '.join([f'\"{c}\"' for c in partition_by])}")
+                if order_by:
+                    over_parts.append(f"ORDER BY \"{order_by}\" {order_dir}")
+
+                over_clause = f"OVER ({' '.join(over_parts)})"
+                ctes.append(f"{cte_name} AS (\n    SELECT *, {f_expr} {over_clause} AS \"{target_col}\"\n    FROM {prev_table}\n)")
             elif rtype == RuleType.JOIN:
                 target_id = p.get("target_dataset_id", "target_table")
                 left_on = p.get("left_on", "key")

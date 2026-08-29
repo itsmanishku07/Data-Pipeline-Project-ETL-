@@ -31,9 +31,12 @@ import {
   ListOrdered,
   Check,
   X,
-  Tag
+  Tag,
+  Folder,
+  FolderOpen,
+  FileText
 } from 'lucide-react';
-import { DataFlowAPI } from '../../services/api';
+import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 
 export const PipelineExecutionView = ({
   stagedDataset = null,
@@ -99,6 +102,13 @@ export const PipelineExecutionView = ({
   const [azureContainer, setAzureContainer] = useState('');
   const [azurePath, setAzurePath] = useState('');
   const [azureKey, setAzureKey] = useState('');
+  const [azureTargetFolder, setAzureTargetFolder] = useState('curated/');
+  const [azureTargetFile, setAzureTargetFile] = useState('');
+  const [azureFormat, setAzureFormat] = useState('parquet');
+  const [azureDestFolders, setAzureDestFolders] = useState([]);
+  const [azureBrowsingDest, setAzureBrowsingDest] = useState(false);
+  const [azureDestExplorerOpen, setAzureDestExplorerOpen] = useState(false);
+  const [azureDestPrefix, setAzureDestPrefix] = useState('');
 
   // Saved Connections
   const [savedConnections, setSavedConnections] = useState([]);
@@ -237,6 +247,31 @@ export const PipelineExecutionView = ({
       setAzureContainer(cfg.azureContainer || 'curated');
       setAzurePath(cfg.azurePath || `${effectiveDataset?.name || 'data'}.parquet`);
       setAzureKey(cfg.azureKey || '');
+      setAzureFormat(cfg.azureFormat || 'parquet');
+    }
+  };
+
+  const handleBrowseAzureDestFolders = async (targetPrefix = '') => {
+    const acc = azureAccount.trim() || 'datalakeprod';
+    const cont = azureContainer.trim() || 'curated';
+    if (!azureAccount) setAzureAccount(acc);
+    if (!azureContainer) setAzureContainer(cont);
+
+    setAzureBrowsingDest(true);
+    try {
+      const res = await DataFlowAPI.browseAzureContainer({
+        account_name: acc,
+        container_name: cont,
+        account_key: azureKey.trim() || undefined,
+        prefix: targetPrefix,
+      });
+      setAzureDestFolders(res.folders || []);
+      setAzureDestPrefix(res.current_prefix || '');
+      setAzureDestExplorerOpen(true);
+    } catch (err) {
+      console.warn('Failed to browse Azure destination folders:', err);
+    } finally {
+      setAzureBrowsingDest(false);
     }
   };
 
@@ -271,14 +306,18 @@ export const PipelineExecutionView = ({
         },
       };
     } else if (destinationType === 'azure') {
+      const fullFolder = azureTargetFolder ? (azureTargetFolder.endsWith('/') ? azureTargetFolder : `${azureTargetFolder}/`) : '';
+      const defaultFileName = `${effectiveDataset?.name || 'export'}_curated.${azureFormat === 'delta' ? 'delta' : azureFormat}`;
+      const finalFileName = (azureTargetFile || '').trim() || defaultFileName;
+      const finalPath = fullFolder ? `${fullFolder}${finalFileName}` : finalFileName;
       return {
         destination_type: 'azure',
         azure_dest: {
-          account_name: azureAccount.trim(),
-          container_name: azureContainer.trim(),
-          path: azurePath.trim(),
+          account_name: (azureAccount.trim() || 'datalakeprod'),
+          container_name: (azureContainer.trim() || 'curated'),
+          path: finalPath,
           account_key: azureKey.trim() || undefined,
-          file_format: 'parquet',
+          file_format: azureFormat,
         },
       };
     }
@@ -347,31 +386,31 @@ export const PipelineExecutionView = ({
   // ==========================================
   if (selectedJobDetails) {
     return (
-      <div className="space-y-6 animate-fadeIn">
+      <div className="space-y-5 animate-fadeIn">
         {/* Top Header Card */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm transition-colors">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs transition-colors">
           <div className="flex items-center space-x-3">
             <button
               type="button"
               onClick={() => setSelectedJobDetails(null)}
-              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center space-x-1 text-xs font-semibold"
+              className="p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors flex items-center space-x-1 text-xs font-medium"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Pipeline Hub</span>
+              <span>Back</span>
             </button>
 
             <div>
               <div className="flex items-center space-x-2">
-                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded uppercase ${
                   selectedJobDetails.status === 'completed'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400'
-                    : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/10 dark:text-rose-400'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40'
+                    : 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/40'
                 }`}>
                   {selectedJobDetails.status}
                 </span>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">{selectedJobDetails.name}</h3>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{selectedJobDetails.name}</h3>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
                 Job ID: {selectedJobDetails.id} • Executed: {new Date(selectedJobDetails.created_at).toLocaleString()}
               </p>
             </div>
@@ -382,7 +421,7 @@ export const PipelineExecutionView = ({
               <button
                 type="button"
                 onClick={() => onViewStagedDataset(selectedJobDetails.output_dataset_id)}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all"
+                className="px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
               >
                 <FolderCheck className="w-3.5 h-3.5" />
                 <span>Inspect Staged Lakehouse Table</span>
@@ -393,7 +432,7 @@ export const PipelineExecutionView = ({
               <a
                 href={DataFlowAPI.getExportDownloadUrl(selectedJobDetails.output_file_path.split('\\').pop().split('/').pop())}
                 download
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center space-x-1 transition-colors"
+                className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1 transition-colors"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download File</span>
@@ -404,51 +443,51 @@ export const PipelineExecutionView = ({
 
         {/* Metrics Overview Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-semibold text-slate-500 uppercase">Input Data Rows</span>
-            <p className="text-lg font-bold text-slate-900 dark:text-white font-mono mt-0.5">
+          <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <span className="text-[10px] text-zinc-400 uppercase">Input Rows</span>
+            <p className="text-base font-semibold text-zinc-900 dark:text-zinc-100 font-mono mt-0.5">
               {selectedJobDetails.input_rows.toLocaleString()}
             </p>
           </div>
 
-          <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-semibold text-slate-500 uppercase">Transformed Output Rows</span>
-            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+          <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <span className="text-[10px] text-zinc-400 uppercase">Output Rows</span>
+            <p className="text-base font-semibold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
               {selectedJobDetails.output_rows.toLocaleString()}
             </p>
           </div>
 
-          <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-semibold text-slate-500 uppercase">Execution Status</span>
-            <p className="text-lg font-bold text-sky-600 dark:text-sky-400 font-mono mt-0.5 uppercase">
+          <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <span className="text-[10px] text-zinc-400 uppercase">Status</span>
+            <p className="text-base font-semibold text-zinc-900 dark:text-zinc-100 font-mono mt-0.5 uppercase">
               {selectedJobDetails.status}
             </p>
           </div>
 
-          <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-semibold text-slate-500 uppercase">Completed At</span>
-            <p className="text-xs font-mono text-slate-700 dark:text-slate-300 mt-1">
+          <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <span className="text-[10px] text-zinc-400 uppercase">Completed</span>
+            <p className="text-xs font-mono text-zinc-700 dark:text-zinc-300 mt-1">
               {selectedJobDetails.completed_at ? new Date(selectedJobDetails.completed_at).toLocaleTimeString() : 'N/A'}
             </p>
           </div>
         </div>
 
         {/* Full Terminal Execution Logs */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-3 transition-colors">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-3 transition-colors">
           <div className="flex items-center space-x-2">
-            <Terminal className="w-4 h-4 text-sky-500" />
-            <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              Full Pipeline DAG Execution & Destination Logs
+            <Terminal className="w-4 h-4 text-zinc-500" />
+            <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
+              Pipeline Execution & Destination Logs
             </h4>
           </div>
 
-          <div className="bg-slate-950 rounded-xl p-4 font-mono text-xs text-slate-300 space-y-1.5 max-h-96 overflow-y-auto border border-slate-800">
+          <div className="bg-zinc-950 rounded-lg p-4 font-mono text-xs text-zinc-300 space-y-1 max-h-96 overflow-y-auto border border-zinc-800">
             {selectedJobDetails.logs && selectedJobDetails.logs.map((log, i) => {
-              let color = 'text-slate-300';
-              if (log.includes('SUCCESS') || log.includes('Loaded')) color = 'text-emerald-400 font-semibold';
-              else if (log.includes('DESTINATION')) color = 'text-sky-400 font-semibold';
+              let color = 'text-zinc-300';
+              if (log.includes('SUCCESS') || log.includes('Loaded')) color = 'text-emerald-400 font-medium';
+              else if (log.includes('DESTINATION')) color = 'text-zinc-200 font-medium';
               else if (log.includes('Warning') || log.includes('WARN')) color = 'text-amber-400';
-              else if (log.includes('Error') || log.includes('failed')) color = 'text-rose-400 font-semibold';
+              else if (log.includes('Error') || log.includes('failed')) color = 'text-red-400 font-medium';
 
               return (
                 <div key={i} className={`leading-relaxed ${color}`}>
@@ -463,43 +502,41 @@ export const PipelineExecutionView = ({
   }
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-5 animate-fadeIn">
       {/* Top Main Navigation Mode Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/30 shrink-0">
-            <PlayCircle className="w-4 h-4" />
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-900 p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs transition-colors">
+        <div className="flex items-center space-x-2.5">
+          <PlayCircle className="w-4 h-4 text-zinc-500 shrink-0" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              Pipeline Execution & Destination Loader
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Pipeline Execution & Destination Export
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Execute transformation DAGs and export curated data directly to MySQL, PostgreSQL, S3, or Azure.
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Execute DAGs and export curated data directly to MySQL, PostgreSQL, S3, or Azure.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit self-end sm:self-auto">
+        <div className="flex items-center space-x-1 bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-md border border-zinc-200 dark:border-zinc-700/60 w-fit self-end sm:self-auto">
           <button
             type="button"
             onClick={() => setViewMode('runner')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              viewMode === 'runner' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              viewMode === 'runner' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
             }`}
           >
-            ⚡ Run Pipeline
+            Run Pipeline
           </button>
 
           <button
             type="button"
             onClick={() => setViewMode('history')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1 ${
-              viewMode === 'history' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1 ${
+              viewMode === 'history' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
             }`}
           >
             <History className="w-3.5 h-3.5" />
-            <span>Saved Executions ({jobHistory.length})</span>
+            <span>History ({jobHistory.length})</span>
           </button>
         </div>
       </div>
@@ -508,28 +545,25 @@ export const PipelineExecutionView = ({
           TAB 1: RUN PIPELINE WORKSPACE
           ========================================== */}
       {viewMode === 'runner' && (
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* FLOW & STAGED DATASET SELECTION CARD */}
-          <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950 text-white rounded-xl p-5 shadow-md border border-slate-800 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 pb-3">
               <div className="flex items-center space-x-2.5">
-                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0">
-                  <GitBranch className="w-4 h-4" />
-                </div>
+                <GitBranch className="w-4 h-4 text-zinc-500 shrink-0" />
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                    Select Data Flow & Staged Dataset to Load
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-900 dark:text-zinc-100">
+                    Select Data Flow & Staged Dataset
                   </h4>
-                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                    Showing all {sortedFlows.length} Data Flows in Chronological Creation Order
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
+                    {sortedFlows.length} Data Flows in catalog
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center space-x-2">
-                <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-full flex items-center space-x-1.5">
-                  <Sparkles className="w-3 h-3" />
-                  <span>{effectiveRules.filter((r) => r.enabled).length} Saved Spark Rules Active</span>
+                <span className="text-xs font-mono text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded flex items-center space-x-1">
+                  <span>{effectiveRules.filter((r) => r.enabled).length} Rules Configured</span>
                 </span>
               </div>
             </div>
@@ -537,15 +571,14 @@ export const PipelineExecutionView = ({
             {/* Chronological Flows List Grid */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1.5">
-                  <ListOrdered className="w-3.5 h-3.5 text-indigo-400" />
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center space-x-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-zinc-500" />
                   <span>Available Data Flows ({sortedFlows.length})</span>
                 </label>
-                <span className="text-[10px] text-slate-400 font-mono">Sorted by Creation Order (#1 to #{sortedFlows.length})</span>
               </div>
 
               {sortedFlows.length === 0 ? (
-                <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400 font-mono">
+                <div className="p-4 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center text-xs text-zinc-400 font-mono">
                   No data flows found in metadata catalog.
                 </div>
               ) : (
@@ -554,79 +587,79 @@ export const PipelineExecutionView = ({
                     const isSelected = flow.id === selectedFlowId;
                     const flowRulesCount = Array.isArray(flow.rules) ? flow.rules.length : 0;
                     const creationDate = flow.created_at 
-                      ? new Date(flow.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                      : 'Initial Flow';
+                      ? new Date(flow.created_at).toLocaleDateString()
+                      : 'Initial';
 
                     return (
                       <div
                         key={flow.id}
-                        className={`p-3 rounded-xl border transition-all flex flex-col justify-between space-y-2.5 ${
+                        className={`p-3 rounded-md border transition-colors flex flex-col justify-between space-y-2 ${
                           isSelected
-                            ? 'bg-indigo-950/80 border-sky-400 ring-1 ring-sky-400/50 shadow-md'
-                            : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                            ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs'
+                            : 'bg-zinc-50/50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-900 dark:text-zinc-100'
                         }`}
                       >
                         <div>
                           <div className="flex items-start justify-between gap-1.5">
                             <div className="flex items-center space-x-1.5 min-w-0">
-                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                              <span className={`text-[10px] font-mono font-medium px-1.5 py-0.2 rounded shrink-0 ${
+                                isSelected ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                              }`}>
                                 #{index + 1}
                               </span>
-                              <span className="font-bold text-xs text-white truncate" title={flow.name}>
+                              <span className="font-medium text-xs truncate" title={flow.name}>
                                 {flow.name}
                               </span>
                             </div>
 
-                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
+                            <span className={`text-[10px] font-mono uppercase px-1.5 py-0.2 rounded shrink-0 ${
+                              isSelected ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                            }`}>
                               {flow.category || 'General'}
                             </span>
                           </div>
 
-                          <p className="text-[10px] text-slate-400 line-clamp-1 mt-1 font-sans">
+                          <p className={`text-xs line-clamp-1 mt-1 font-sans ${isSelected ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'}`}>
                             {flow.description || 'Enterprise Lakehouse Flow'}
                           </p>
 
-                          <div className="flex items-center space-x-1 text-[9px] font-mono text-slate-400 mt-1.5">
-                            <Calendar className="w-2.5 h-2.5 text-slate-500" />
+                          <div className={`flex items-center space-x-1 text-[10px] font-mono mt-1 ${isSelected ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-400'}`}>
+                            <Calendar className="w-2.5 h-2.5" />
                             <span className="truncate">{creationDate}</span>
                           </div>
                         </div>
 
-                        <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                        <div className={`pt-2 border-t flex items-center justify-between text-[11px] font-mono ${
+                          isSelected ? 'border-white/10 dark:border-zinc-900/10' : 'border-zinc-200 dark:border-zinc-800'
+                        }`}>
                           <div className="flex items-center space-x-1.5">
-                            <span className="text-emerald-400 font-semibold">{flow.dataset_count || 0} Sets</span>
+                            <span>{flow.dataset_count || 0} Sets</span>
                             <span>•</span>
-                            <span className="text-sky-300 font-semibold">{flowRulesCount} Rules</span>
+                            <span>{flowRulesCount} Rules</span>
                           </div>
 
                           <div className="flex items-center space-x-1.5">
                             <button
                               type="button"
                               onClick={() => setViewingFlowDetails(flow)}
-                              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[10px] font-bold flex items-center space-x-1 transition-colors"
+                              className={`px-2 py-0.5 rounded text-xs font-medium flex items-center space-x-1 transition-colors ${
+                                isSelected ? 'bg-white/20 text-white hover:bg-white/30 dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300'
+                              }`}
                               title="View Flow Details"
                             >
-                              <Info className="w-3 h-3 text-sky-400" />
                               <span>Details</span>
                             </button>
 
                             <button
                               type="button"
                               onClick={() => handleFlowChange(flow.id)}
-                              className={`px-2 py-1 rounded text-[10px] font-bold flex items-center space-x-1 transition-all ${
+                              className={`px-2.5 py-0.5 rounded text-xs font-medium flex items-center space-x-1 transition-colors ${
                                 isSelected
-                                  ? 'bg-sky-500 text-white shadow-sm'
-                                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                                  ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
+                                  : 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
                               }`}
                             >
-                              {isSelected ? (
-                                <>
-                                  <Check className="w-3 h-3 text-white" />
-                                  <span>Selected</span>
-                                </>
-                              ) : (
-                                <span>Select</span>
-                              )}
+                              {isSelected ? <span>Active</span> : <span>Select</span>}
                             </button>
                           </div>
                         </div>
@@ -638,14 +671,14 @@ export const PipelineExecutionView = ({
             </div>
 
             {/* Staged Dataset Selector for Selected Flow */}
-            <div className="pt-2 border-t border-white/10">
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                Staged Lakehouse Dataset (Attached to Selected Flow "{currentFlow?.name || selectedFlowId}")
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                Staged Dataset for Flow: "{currentFlow?.name || selectedFlowId}"
               </label>
               <select
                 value={effectiveDataset?.id || ''}
                 onChange={(e) => handleDatasetChange(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono text-emerald-300 focus:outline-none focus:border-emerald-400"
+                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
               >
                 {flowDatasets.length === 0 ? (
                   <option value="">No staged datasets found in this flow</option>
@@ -661,49 +694,49 @@ export const PipelineExecutionView = ({
 
             {/* Visual DAG Execution Sequence Preview */}
             {effectiveDataset && (
-              <div className="pt-2 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs font-mono">
-                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 flex items-center space-x-1">
-                  <HardDrive className="w-3 h-3 text-emerald-400" />
-                  <span>Input: <strong>{effectiveDataset.name}</strong> ({effectiveDataset.row_count?.toLocaleString()} rows)</span>
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center gap-2 text-xs font-mono">
+                <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 flex items-center space-x-1">
+                  <HardDrive className="w-3 h-3 text-zinc-400" />
+                  <span>Input: <strong>{effectiveDataset.name}</strong></span>
                 </span>
 
-                <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
 
-                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-sky-300 flex items-center space-x-1">
-                  <Sliders className="w-3 h-3 text-sky-400" />
-                  <span>DAG: <strong>{effectiveRules.filter((r) => r.enabled).length} Transform Rules</strong></span>
+                <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 flex items-center space-x-1">
+                  <Sliders className="w-3 h-3 text-zinc-400" />
+                  <span>DAG: <strong>{effectiveRules.filter((r) => r.enabled).length} Rules</strong></span>
                 </span>
 
-                <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
 
-                <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-amber-300 flex items-center space-x-1">
-                  <Server className="w-3 h-3 text-amber-400" />
-                  <span>Dest: <strong className="uppercase">{destinationType}</strong> ({destinationType === 'database' ? dbTable : (destinationType === 's3' ? s3Bucket : outputDatasetName)})</span>
+                <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 flex items-center space-x-1">
+                  <Server className="w-3 h-3 text-zinc-400" />
+                  <span>Dest: <strong className="uppercase">{destinationType}</strong></span>
                 </span>
               </div>
             )}
           </div>
 
           {/* Destination & Output Configuration Form */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4 transition-colors">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-4 transition-colors">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-3">
               <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-sky-500" />
-                  <span>Configure Target Export Destination & Output</span>
+                <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-1.5">
+                  <Server className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>Configure Target Export Destination</span>
                 </h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Select destination engine, define schema/table creation options, and execute the DAG.
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Select destination engine and options to load your data.
                 </p>
               </div>
 
               {savedConnections.length > 0 && (
                 <div className="flex items-center space-x-1.5">
-                  <span className="text-[11px] text-slate-400 font-mono">Preset:</span>
+                  <span className="text-xs text-zinc-400">Preset:</span>
                   <select
                     value={selectedSavedConnId}
                     onChange={(e) => handleApplySavedConnection(e.target.value)}
-                    className="px-2.5 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-700 dark:text-slate-300"
+                    className="px-2.5 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none"
                   >
                     <option value="">-- Load Saved Connection --</option>
                     {savedConnections.map((c) => (
@@ -719,31 +752,31 @@ export const PipelineExecutionView = ({
             {/* General Output Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Pipeline Name</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Pipeline Name</label>
                 <input
                   type="text"
                   value={pipelineName}
                   onChange={(e) => setPipelineName(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-sky-500"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Curated Stage Name</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Curated Stage Name</label>
                 <input
                   type="text"
                   value={outputDatasetName}
                   onChange={(e) => setOutputDatasetName(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-emerald-700 dark:text-emerald-400 font-mono focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Export File Format</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Export File Format</label>
                 <select
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono focus:outline-none"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 >
                   <option value="parquet">Apache Parquet</option>
                   <option value="csv">CSV File</option>
@@ -753,8 +786,8 @@ export const PipelineExecutionView = ({
             </div>
 
             {/* Destination Type Tabs */}
-            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+            <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 space-y-3">
+              <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                 Select Destination Engine
               </label>
 
@@ -762,66 +795,66 @@ export const PipelineExecutionView = ({
                 <button
                   type="button"
                   onClick={() => { setDestinationType('database'); setDestTestResult(null); }}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center space-y-1 ${
+                  className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1 ${
                     destinationType === 'database'
-                      ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white border-slate-900 dark:border-sky-500 shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs font-medium'
+                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <Database className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Relational Database</span>
+                  <span className="text-xs">Database (MySQL / Postgres)</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setDestinationType('lakehouse'); setDestTestResult(null); }}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center space-y-1 ${
+                  className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1 ${
                     destinationType === 'lakehouse'
-                      ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white border-slate-900 dark:border-sky-500 shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs font-medium'
+                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <HardDrive className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Lakehouse Staging</span>
+                  <span className="text-xs">Lakehouse Staging</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setDestinationType('s3'); setDestTestResult(null); }}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center space-y-1 ${
+                  className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1 ${
                     destinationType === 's3'
-                      ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white border-slate-900 dark:border-sky-500 shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs font-medium'
+                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <Cloud className="w-4 h-4" />
-                  <span className="text-xs font-semibold">AWS S3 Lake</span>
+                  <span className="text-xs">AWS S3 Lake</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setDestinationType('azure'); setDestTestResult(null); }}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center space-y-1 ${
+                  className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1 ${
                     destinationType === 'azure'
-                      ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white border-slate-900 dark:border-sky-500 shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs font-medium'
+                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <Cloud className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Azure ADLS Blob</span>
+                  <span className="text-xs">Azure ADLS Blob</span>
                 </button>
               </div>
 
               {/* Dynamic Destination Configuration Forms */}
               {destinationType === 'database' && (
-                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="bg-zinc-50/50 dark:bg-zinc-950 p-4 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Engine</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Engine</label>
                       <select
                         value={dbType}
                         onChange={(e) => handleDbTypeChange(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       >
                         <option value="mysql">MySQL Flexible Server</option>
                         <option value="postgresql">PostgreSQL</option>
@@ -830,63 +863,63 @@ export const PipelineExecutionView = ({
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Host / Server</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Host / Server</label>
                       <input
                         type="text"
                         value={dbHost}
                         onChange={(e) => setDbHost(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Database Name</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name</label>
                       <input
                         type="text"
                         value={dbName}
                         onChange={(e) => setDbName(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Username</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
                       <input
                         type="text"
                         value={dbUser}
                         onChange={(e) => setDbUser(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Password</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
                       <input
                         type="password"
                         value={dbPassword}
                         onChange={(e) => setDbPassword(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Target Table Name</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Target Table Name</label>
                       <input
                         type="text"
                         value={dbTable}
                         onChange={(e) => setDbTable(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-emerald-600 dark:text-emerald-400 font-mono font-bold"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono font-medium"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Write Mode</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Write Mode</label>
                       <select
                         value={dbWriteMode}
                         onChange={(e) => setDbWriteMode(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                       >
                         <option value="replace">REPLACE (Overwrite Table)</option>
                         <option value="append">APPEND (Insert Rows)</option>
@@ -896,13 +929,13 @@ export const PipelineExecutionView = ({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                    <div className="flex items-center space-x-4 text-xs text-slate-600 dark:text-slate-400">
+                    <div className="flex items-center space-x-4 text-xs text-zinc-600 dark:text-zinc-400">
                       <label className="flex items-center space-x-1.5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={createDbIfNotExists}
                           onChange={(e) => setCreateDbIfNotExists(e.target.checked)}
-                          className="rounded text-sky-600"
+                          className="rounded"
                         />
                         <span>Auto-create Database if not exists</span>
                       </label>
@@ -912,9 +945,9 @@ export const PipelineExecutionView = ({
                       type="button"
                       onClick={handleTestDestination}
                       disabled={testingDest}
-                      className="px-3.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+                      className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-50"
                     >
-                      <Zap className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin text-amber-500' : 'text-amber-500'}`} />
+                      <Zap className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin' : ''}`} />
                       <span>{testingDest ? 'Testing Destination...' : 'Test Destination Connection'}</span>
                     </button>
                   </div>
@@ -922,33 +955,33 @@ export const PipelineExecutionView = ({
               )}
 
               {destinationType === 's3' && (
-                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="bg-zinc-50/50 dark:bg-zinc-950 p-4 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">S3 Bucket</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">S3 Bucket</label>
                       <input
                         type="text"
                         value={s3Bucket}
                         onChange={(e) => setS3Bucket(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Object Key Prefix</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Object Key Prefix</label>
                       <input
                         type="text"
                         value={s3Key}
                         onChange={(e) => setS3Key(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">AWS Region</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">AWS Region</label>
                       <input
                         type="text"
                         value={s3Region}
                         onChange={(e) => setS3Region(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
                   </div>
@@ -956,50 +989,165 @@ export const PipelineExecutionView = ({
               )}
 
               {destinationType === 'azure' && (
-                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="bg-zinc-50/50 dark:bg-zinc-950 p-4 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-3.5">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Storage Account</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Storage Account *</label>
                       <input
                         type="text"
+                        placeholder="datalakeprod"
                         value={azureAccount}
                         onChange={(e) => setAzureAccount(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Blob Container</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Blob Container *</label>
                       <input
                         type="text"
+                        placeholder="curated"
                         value={azureContainer}
                         onChange={(e) => setAzureContainer(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Blob Path</label>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Account Key / SAS Token</label>
                       <input
-                        type="text"
-                        value={azurePath}
-                        onChange={(e) => setAzurePath(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono"
+                        type="password"
+                        placeholder="Optional for public/simulated"
+                        value={azureKey}
+                        onChange={(e) => setAzureKey(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
+                  </div>
+
+                  {/* Destination Folder Selector with Browse Action */}
+                  <div className="space-y-2 pt-1 border-t border-zinc-200 dark:border-zinc-800">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        Target Folder Path
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleBrowseAzureDestFolders(azureDestPrefix)}
+                        disabled={azureBrowsingDest}
+                        className="text-xs text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white font-medium flex items-center space-x-1 underline"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>{azureBrowsingDest ? 'Browsing...' : 'Browse Container Folders'}</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. curated/gold/ or analytics/2026/"
+                        value={azureTargetFolder}
+                        onChange={(e) => setAzureTargetFolder(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAzureTargetFolder('')}
+                        className="px-2.5 py-1.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-mono"
+                        title="Set to container root"
+                      >
+                        Root /
+                      </button>
+                    </div>
+
+                    {/* Quick Folder Picker if Opened */}
+                    {azureDestExplorerOpen && (
+                      <div className="p-3 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2 animate-fadeIn">
+                        <div className="flex items-center justify-between text-xs text-zinc-500">
+                          <span className="font-semibold uppercase tracking-wider text-[10px]">Select Existing Target Folder:</span>
+                          <button
+                            type="button"
+                            onClick={() => setAzureDestExplorerOpen(false)}
+                            className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => { setAzureTargetFolder(''); setAzureDestExplorerOpen(false); }}
+                            className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-xs font-mono hover:bg-zinc-900 hover:text-white dark:hover:bg-zinc-100 dark:hover:text-zinc-900 transition-colors"
+                          >
+                            / (Container Root)
+                          </button>
+                          {azureDestFolders.map((f) => (
+                            <button
+                              key={f.path}
+                              type="button"
+                              onClick={() => { setAzureTargetFolder(f.path); setAzureDestExplorerOpen(false); }}
+                              className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-xs font-mono flex items-center space-x-1 hover:bg-zinc-900 hover:text-white dark:hover:bg-zinc-100 dark:hover:text-zinc-900 transition-colors"
+                            >
+                              <Folder className="w-3 h-3 text-zinc-400" />
+                              <span>{f.path}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Output File Name and Format */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Output Target File / Table Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={`${effectiveDataset?.name || 'transformed_data'}_curated.${azureFormat === 'delta' ? 'delta' : azureFormat}`}
+                        value={azureTargetFile}
+                        onChange={(e) => setAzureTargetFile(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Output Format
+                      </label>
+                      <select
+                        value={azureFormat}
+                        onChange={(e) => setAzureFormat(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      >
+                        <option value="parquet">Parquet (.parquet)</option>
+                        <option value="delta">Delta Lake (Directory)</option>
+                        <option value="csv">CSV (.csv)</option>
+                        <option value="json">JSON (.json)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Live Target URI Preview */}
+                  <div className="p-2.5 rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-700 dark:text-zinc-300 flex items-center space-x-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate">
+                      Destination Target: <strong>abfss://{azureContainer || 'curated'}@{azureAccount || 'datalakeprod'}.dfs.core.windows.net/{(azureTargetFolder ? (azureTargetFolder.endsWith('/') ? azureTargetFolder : azureTargetFolder + '/') : '') + (azureTargetFile || `${effectiveDataset?.name || 'export'}_curated.${azureFormat === 'delta' ? 'delta' : azureFormat}`)}</strong>
+                    </span>
                   </div>
                 </div>
               )}
 
               {/* Destination Test Feedback */}
               {destTestResult && (
-                <div className={`p-3 rounded-lg border text-xs font-mono flex items-start space-x-2 ${
+                <div className={`p-3 rounded-md border text-xs font-mono flex items-start space-x-2 ${
                   destTestResult.success
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20'
-                    : 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                    : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/40'
                 }`}>
                   {destTestResult.success ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                   )}
                   <div>
                     <p className="font-semibold">{destTestResult.success ? 'Destination Ready' : 'Destination Notice'}</p>
@@ -1010,35 +1158,35 @@ export const PipelineExecutionView = ({
             </div>
 
             {/* Run Button */}
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end">
               <button
                 type="button"
                 onClick={handleRunPipeline}
                 disabled={executing || !pipelineName.trim() || !effectiveDataset}
-                className="w-full sm:w-auto justify-center px-6 py-3 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-2 shadow-md transition-all disabled:opacity-50"
+                className="w-full sm:w-auto justify-center px-5 py-2 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-2 shadow-xs transition-colors disabled:opacity-50"
               >
                 <PlayCircle className={`w-4 h-4 ${executing ? 'animate-spin' : ''}`} />
-                <span>{executing ? 'Executing Spark DAG & Loading Target...' : 'Run Pipeline & Load Destination'}</span>
+                <span>{executing ? 'Executing Pipeline DAG...' : 'Run Pipeline & Load Destination'}</span>
               </button>
             </div>
           </div>
 
           {/* Live Terminal Logs & Execution Monitor */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm space-y-3 transition-colors">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-3 transition-colors">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
               <div className="flex items-center space-x-2">
-                <Terminal className="w-4 h-4 text-sky-500 shrink-0" />
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider truncate">
+                <Terminal className="w-4 h-4 text-zinc-500 shrink-0" />
+                <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider truncate">
                   Live DAG Execution & Destination Monitor
                 </h4>
               </div>
 
               {activeJob && (
                 <div className="flex items-center space-x-2 self-end sm:self-auto">
-                  <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                  <span className={`text-[10px] font-mono font-medium uppercase px-2 py-0.5 rounded ${
                     activeJob.status === 'completed'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400'
-                      : 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-500/10 dark:text-sky-400 animate-pulse'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
+                      : 'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 animate-pulse'
                   }`}>
                     {activeJob.status}
                   </span>
@@ -1046,7 +1194,7 @@ export const PipelineExecutionView = ({
                   <button
                     type="button"
                     onClick={() => setSelectedJobDetails(activeJob)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center space-x-1"
+                    className="px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1"
                   >
                     <span>Details</span>
                     <ExternalLink className="w-3 h-3" />
@@ -1056,7 +1204,7 @@ export const PipelineExecutionView = ({
             </div>
 
             {errorMsg && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 rounded-md text-red-700 dark:text-red-400 text-xs flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
@@ -1065,37 +1213,37 @@ export const PipelineExecutionView = ({
             {/* Active Execution Metrics Banner */}
             {activeJob && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Input Rows</span>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white font-mono mt-0.5">{activeJob.input_rows.toLocaleString()}</p>
+                <div className="p-2.5 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 uppercase">Input Rows</span>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 font-mono mt-0.5">{activeJob.input_rows.toLocaleString()}</p>
                 </div>
 
-                <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Loaded Output</span>
-                  <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">{activeJob.output_rows.toLocaleString()}</p>
+                <div className="p-2.5 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 uppercase">Loaded Output</span>
+                  <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">{activeJob.output_rows.toLocaleString()}</p>
                 </div>
 
-                <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Destination</span>
-                  <p className="text-xs font-bold text-sky-600 dark:text-sky-400 font-mono mt-1 uppercase">{destinationType}</p>
+                <div className="p-2.5 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 uppercase">Destination</span>
+                  <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 font-mono mt-1 uppercase">{destinationType}</p>
                 </div>
 
-                <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Curated ID</span>
-                  <p className="text-xs font-mono text-slate-700 dark:text-slate-300 mt-1 truncate">{activeJob.output_dataset_id || 'N/A'}</p>
+                <div className="p-2.5 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 uppercase">Curated ID</span>
+                  <p className="text-xs font-mono text-zinc-700 dark:text-zinc-300 mt-1 truncate">{activeJob.output_dataset_id || 'N/A'}</p>
                 </div>
               </div>
             )}
 
             {/* Terminal Log Viewer */}
-            <div className="bg-slate-950 rounded-xl p-4 font-mono text-xs text-slate-300 space-y-1.5 min-h-[220px] max-h-[350px] overflow-y-auto border border-slate-800">
+            <div className="bg-zinc-950 rounded-lg p-4 font-mono text-xs text-zinc-300 space-y-1 min-h-[220px] max-h-[350px] overflow-y-auto border border-zinc-800">
               {activeJob && activeJob.logs && activeJob.logs.length > 0 ? (
                 activeJob.logs.map((log, i) => {
-                  let color = 'text-slate-300';
-                  if (log.includes('SUCCESS') || log.includes('Loaded')) color = 'text-emerald-400 font-semibold';
-                  else if (log.includes('DESTINATION')) color = 'text-sky-400 font-semibold';
+                  let color = 'text-zinc-300';
+                  if (log.includes('SUCCESS') || log.includes('Loaded')) color = 'text-emerald-400 font-medium';
+                  else if (log.includes('DESTINATION')) color = 'text-zinc-100 font-medium';
                   else if (log.includes('Warning') || log.includes('WARN')) color = 'text-amber-400';
-                  else if (log.includes('Error') || log.includes('failed')) color = 'text-rose-400 font-semibold';
+                  else if (log.includes('Error') || log.includes('failed')) color = 'text-red-400 font-medium';
 
                   return (
                     <div key={i} className={`leading-relaxed ${color}`}>
@@ -1104,9 +1252,9 @@ export const PipelineExecutionView = ({
                   );
                 })
               ) : (
-                <div className="text-center py-14 text-slate-500 space-y-1">
-                  <p className="font-semibold text-slate-400">Terminal Idle: Ready to Execute</p>
-                  <p className="text-[11px]">Select a Flow above, configure your destination, and click <strong>"Run Pipeline & Load Destination"</strong>.</p>
+                <div className="text-center py-14 text-zinc-500 space-y-1">
+                  <p className="font-medium text-zinc-400">Terminal Idle: Ready to Execute</p>
+                  <p className="text-xs">Select a Flow above, configure your destination, and click <strong>"Run Pipeline & Load Destination"</strong>.</p>
                 </div>
               )}
             </div>
@@ -1119,67 +1267,67 @@ export const PipelineExecutionView = ({
           ========================================== */}
       {viewMode === 'history' && (
         <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
                 Executed Pipeline Jobs ({jobHistory.length})
               </h4>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Click on any pipeline execution below to inspect its detailed metrics, rules, and full terminal logs.
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Click on any pipeline execution below to inspect its metrics, rules, and logs.
               </p>
             </div>
 
             {jobHistory.length > 0 && (
               <div className="relative w-full sm:w-auto">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search pipelines..."
+                  placeholder="Filter pipelines..."
                   value={historySearchTerm}
                   onChange={(e) => setHistorySearchTerm(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-full sm:w-48 font-sans"
+                  className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-full sm:w-48 font-sans"
                 />
               </div>
             )}
           </div>
 
           {jobHistory.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-12 text-center text-slate-400 text-xs space-y-2">
-              <History className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
-              <p className="font-semibold text-slate-700 dark:text-slate-300">No Pipeline Executions Recorded Yet</p>
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-12 text-center text-zinc-400 text-xs space-y-2">
+              <History className="w-8 h-8 mx-auto text-zinc-400 dark:text-zinc-600" />
+              <p className="font-semibold text-zinc-700 dark:text-zinc-300">No Pipeline Executions Recorded Yet</p>
               <p>Execute your first Spark DAG in the <strong>"Run Pipeline"</strong> tab.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {filteredHistory.map((job) => (
                 <div
                   key={job.id}
                   onClick={() => setSelectedJobDetails(job)}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-900 dark:hover:border-sky-500 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-3"
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-lg p-4 shadow-xs transition-colors cursor-pointer flex flex-col justify-between group space-y-3"
                 >
                   <div>
                     <div className="flex items-start justify-between">
-                      <span className="font-bold text-xs text-slate-900 dark:text-white truncate group-hover:text-sky-600 dark:group-hover:text-sky-400">
+                      <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">
                         {job.name}
                       </span>
-                      <span className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded ${
-                        job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                      <span className={`text-[10px] font-mono uppercase px-1.5 py-0.2 rounded ${
+                        job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40' : 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/40'
                       }`}>
                         {job.status}
                       </span>
                     </div>
 
-                    <p className="text-[10px] font-mono text-slate-400 mt-1">
+                    <p className="text-[10px] font-mono text-zinc-400 mt-1">
                       ID: {job.id} • {new Date(job.created_at).toLocaleTimeString()}
                     </p>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] font-mono">
-                    <span className="text-slate-500 dark:text-slate-400">
-                      {job.input_rows.toLocaleString()} ➔ <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{job.output_rows.toLocaleString()}</strong> rows
+                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs font-mono">
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      {job.input_rows.toLocaleString()} ➔ <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{job.output_rows.toLocaleString()}</strong> rows
                     </span>
 
-                    <span className="text-xs font-bold text-slate-900 dark:text-sky-400 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
+                    <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
                       <span>Details</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </span>
@@ -1193,24 +1341,22 @@ export const PipelineExecutionView = ({
 
       {/* FLOW DETAILS MODAL */}
       {viewingFlowDetails && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 text-slate-900 dark:text-slate-100 max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg max-w-2xl w-full p-5 shadow-xl space-y-4 text-zinc-900 dark:text-zinc-100 max-h-[85vh] overflow-y-auto">
             {/* Header */}
-            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/20">
-                  <GitBranch className="w-5 h-5" />
-                </div>
+            <div className="flex items-start justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <GitBranch className="w-5 h-5 text-zinc-500" />
                 <div>
                   <div className="flex items-center space-x-2">
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
+                    <span className="text-xs font-mono font-medium px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
                       {viewingFlowDetails.category || 'General'}
                     </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 uppercase font-bold">
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 uppercase font-medium">
                       {viewingFlowDetails.status || 'Active'}
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-1">
                     {viewingFlowDetails.name}
                   </h3>
                 </div>
@@ -1219,7 +1365,7 @@ export const PipelineExecutionView = ({
               <button
                 type="button"
                 onClick={() => setViewingFlowDetails(null)}
-                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors"
+                className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1227,30 +1373,30 @@ export const PipelineExecutionView = ({
 
             {/* Description & Metadata Grid */}
             <div className="space-y-3">
-              <p className="text-xs text-slate-600 dark:text-slate-400">
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
                 {viewingFlowDetails.description || 'No detailed flow description provided.'}
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono">
                 <div>
-                  <span className="text-[10px] text-slate-400 block">FLOW ID</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">{viewingFlowDetails.id}</span>
+                  <span className="text-[10px] text-zinc-400 block">FLOW ID</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate block">{viewingFlowDetails.id}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">CREATED</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                  <span className="text-[10px] text-zinc-400 block">CREATED</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200 block">
                     {viewingFlowDetails.created_at ? new Date(viewingFlowDetails.created_at).toLocaleDateString() : 'Initial'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">DATASETS</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
+                  <span className="text-[10px] text-zinc-400 block">DATASETS</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 block">
                     {viewingFlowDetails.dataset_count || 0} Attached
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">SAVED RULES</span>
-                  <span className="font-bold text-sky-600 dark:text-sky-400 block">
+                  <span className="text-[10px] text-zinc-400 block">RULES</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 block">
                     {Array.isArray(viewingFlowDetails.rules) ? viewingFlowDetails.rules.length : 0} Rules
                   </span>
                 </div>
@@ -1259,13 +1405,13 @@ export const PipelineExecutionView = ({
 
             {/* Attached Staged Datasets Section */}
             <div className="space-y-2">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center space-x-1.5">
-                <HardDrive className="w-3.5 h-3.5 text-emerald-500" />
+              <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center space-x-1.5">
+                <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
                 <span>Attached Staged Datasets</span>
               </h4>
 
               {allStagedDatasets.filter((d) => d.flow_id === viewingFlowDetails.id).length === 0 ? (
-                <p className="text-xs text-slate-400 font-mono p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-zinc-400 font-mono p-3 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 text-center">
                   No staged datasets attached to this flow yet.
                 </p>
               ) : (
@@ -1275,14 +1421,14 @@ export const PipelineExecutionView = ({
                     .map((ds) => (
                       <div
                         key={ds.id}
-                        className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-mono"
+                        className="p-2 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs font-mono"
                       >
                         <div>
-                          <span className="font-bold text-slate-900 dark:text-white">{ds.name}</span>
-                          <span className="text-[10px] text-slate-400 ml-2">({ds.source_type})</span>
+                          <span className="font-medium text-zinc-900 dark:text-zinc-100">{ds.name}</span>
+                          <span className="text-[10px] text-zinc-400 ml-2">({ds.source_type})</span>
                         </div>
-                        <div className="text-slate-500 dark:text-slate-400">
-                          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{ds.row_count?.toLocaleString()}</strong> rows • {ds.column_count} cols
+                        <div className="text-zinc-500 dark:text-zinc-400">
+                          <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{ds.row_count?.toLocaleString()}</strong> rows • {ds.column_count} cols
                         </div>
                       </div>
                     ))}
@@ -1292,13 +1438,13 @@ export const PipelineExecutionView = ({
 
             {/* Configured Spark Transformation Rules Section */}
             <div className="space-y-2">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center space-x-1.5">
-                <Sliders className="w-3.5 h-3.5 text-sky-500" />
+              <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center space-x-1.5">
+                <Sliders className="w-3.5 h-3.5 text-zinc-500" />
                 <span>Configured Transformation Rules ({Array.isArray(viewingFlowDetails.rules) ? viewingFlowDetails.rules.length : 0})</span>
               </h4>
 
               {(!viewingFlowDetails.rules || viewingFlowDetails.rules.length === 0) ? (
-                <p className="text-xs text-slate-400 font-mono p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-zinc-400 font-mono p-3 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 text-center">
                   No transformation rules configured for this flow yet.
                 </p>
               ) : (
@@ -1306,18 +1452,18 @@ export const PipelineExecutionView = ({
                   {viewingFlowDetails.rules.map((rule, rIdx) => (
                     <div
                       key={rule.id || rIdx}
-                      className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
+                      className="p-2 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs"
                     >
                       <div className="flex items-center space-x-2">
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 uppercase">
+                        <span className="text-[9px] font-mono font-medium px-1.5 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 uppercase">
                           {rule.rule_type}
                         </span>
-                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                        <span className="font-mono text-zinc-700 dark:text-zinc-300">
                           {rule.description || rule.params?.condition || rule.params?.column_name || 'Step'}
                         </span>
                       </div>
-                      <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                        rule.enabled !== false ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-slate-400 bg-slate-100 dark:bg-slate-800'
+                      <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded ${
+                        rule.enabled !== false ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400' : 'text-zinc-400 bg-zinc-100 dark:bg-zinc-800'
                       }`}>
                         {rule.enabled !== false ? 'Enabled' : 'Disabled'}
                       </span>
@@ -1328,11 +1474,11 @@ export const PipelineExecutionView = ({
             </div>
 
             {/* Footer Action Buttons */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end space-x-2">
+            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end space-x-2">
               <button
                 type="button"
                 onClick={() => setViewingFlowDetails(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-colors"
+                className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium text-xs transition-colors"
               >
                 Close
               </button>
@@ -1343,10 +1489,10 @@ export const PipelineExecutionView = ({
                   handleFlowChange(viewingFlowDetails.id);
                   setViewingFlowDetails(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-sm transition-all"
+                className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 font-medium text-xs flex items-center space-x-1.5 shadow-xs transition-colors"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Select & Load This Flow</span>
+                <span>Select Flow</span>
               </button>
             </div>
           </div>

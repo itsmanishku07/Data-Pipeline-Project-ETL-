@@ -24,7 +24,7 @@ import {
   Filter,
   RefreshCw
 } from 'lucide-react';
-import { DataFlowAPI } from '../../services/api';
+import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 
 export const FlowsOverviewTrackerView = ({
   flows = [],
@@ -110,7 +110,7 @@ export const FlowsOverviewTrackerView = ({
       if (onSelectFlow) onSelectFlow(created.id);
       if (jumpToSource && onNavigateToStep) onNavigateToStep(1);
     } catch (err) {
-      setCreateError(err?.response?.data?.detail || err.message || 'Failed to create flow');
+      setCreateError(extractErrorMessage(err, 'Failed to create flow'));
     } finally {
       setCreatingFlow(false);
     }
@@ -125,7 +125,7 @@ export const FlowsOverviewTrackerView = ({
       if (selectedFlowModal?.id === flowId) setSelectedFlowModal(null);
       if (onRefreshFlows) onRefreshFlows();
     } catch (err) {
-      alert(err?.response?.data?.detail || err.message || 'Failed to delete flow');
+      alert(extractErrorMessage(err, 'Failed to delete flow'));
     }
   };
 
@@ -144,108 +144,101 @@ export const FlowsOverviewTrackerView = ({
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-16 sm:bottom-6 right-6 z-50 bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xl flex items-center space-x-2 animate-bounce">
-          <Check className="w-4 h-4" />
+        <div className="fixed bottom-16 sm:bottom-6 right-6 z-50 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 text-xs font-medium px-4 py-2.5 rounded-md shadow-lg flex items-center space-x-2 animate-fadeIn">
+          <Check className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
           <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* Top Banner / Executive Dashboard */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-lg border border-slate-800 space-y-5">
+      {/* Top Header & Executive Dashboard */}
+      <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-                <GitBranch className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white tracking-tight">
-                  Data Flows Lifecycle Tracker
-                </h2>
-                <p className="text-xs text-slate-300 font-mono mt-0.5">
-                  Real-time pipeline progression monitoring across Ingestion, Schema, Staging, Transform & Execution
-                </p>
-              </div>
-            </div>
+            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 tracking-tight">
+              Data Flows Overview
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Pipeline stage progression across ingestion, schema, staging, transformation, and execution.
+            </p>
           </div>
 
-          <div className="flex items-center space-x-2.5">
+          <div className="flex items-center space-x-2">
             <button
               type="button"
               onClick={onRefreshFlows}
-              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1 transition-all"
+              className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors"
               title="Refresh Flows Data"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
               <span className="hidden sm:inline">Refresh</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-md hover:shadow-indigo-500/25 transition-all"
+              className="px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Create New Flow</span>
+              <span>Create Flow</span>
             </button>
           </div>
         </div>
 
-        {/* 5 High-Level KPI Summary Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 border-t border-white/10">
-          <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-            <span className="text-[10px] font-mono text-slate-400 block uppercase">TOTAL FLOWS</span>
-            <strong className="text-base font-bold text-white block mt-0.5">{totalFlows}</strong>
-            <span className="text-[9px] text-slate-400 font-mono">Creation Order</span>
+        {/* 5 KPI Summary Metrics */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">Total Flows</span>
+            <strong className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 block mt-1">{totalFlows}</strong>
+            <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">Configured pipelines</span>
           </div>
 
-          <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-            <span className="text-[10px] font-mono text-emerald-400 block uppercase">100% READY FLOWS</span>
-            <strong className="text-base font-bold text-emerald-400 block mt-0.5">{completedFlows}</strong>
-            <span className="text-[9px] text-slate-400 font-mono">All 5 Stages Done</span>
+          <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">Completed Flows</span>
+            <strong className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 block mt-1">{completedFlows}</strong>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 block">100% all stages</span>
           </div>
 
-          <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-            <span className="text-[10px] font-mono text-sky-400 block uppercase">STAGED SETS</span>
-            <strong className="text-base font-bold text-sky-400 block mt-0.5">{totalDatasets}</strong>
-            <span className="text-[9px] text-slate-400 font-mono">Lakehouse Tables</span>
+          <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">Staged Datasets</span>
+            <strong className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 block mt-1">{totalDatasets}</strong>
+            <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">Parquet lakehouse sets</span>
           </div>
 
-          <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-            <span className="text-[10px] font-mono text-amber-400 block uppercase">SPARK RULES</span>
-            <strong className="text-base font-bold text-amber-400 block mt-0.5">{totalRules}</strong>
-            <span className="text-[9px] text-slate-400 font-mono">Active Transform Steps</span>
+          <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">Spark Rules</span>
+            <strong className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 block mt-1">{totalRules}</strong>
+            <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">Active transformations</span>
           </div>
 
-          <div className="p-3 bg-white/5 rounded-xl border border-white/5 col-span-2 sm:col-span-1">
-            <span className="text-[10px] font-mono text-indigo-400 block uppercase">MANAGED ROWS</span>
-            <strong className="text-base font-bold text-indigo-400 block mt-0.5">{totalRows.toLocaleString()}</strong>
-            <span className="text-[9px] text-slate-400 font-mono">Curated Data Volume</span>
+          <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs col-span-2 sm:col-span-1">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">Managed Rows</span>
+            <strong className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 block mt-1">{totalRows.toLocaleString()}</strong>
+            <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">Total data volume</span>
           </div>
         </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative flex-1">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-400" />
           <input
             type="text"
-            placeholder="Search flow name, category, or description..."
+            placeholder="Filter flows by name, category, or description..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-sans"
+            className="w-full pl-9 pr-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-shadow"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Category Filter */}
-          <div className="flex items-center space-x-1 text-xs">
-            <span className="text-[11px] text-slate-400 font-mono">Category:</span>
+          <div className="flex items-center space-x-1.5 text-xs">
+            <span className="text-xs text-zinc-400">Category:</span>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-2.5 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-700 dark:text-slate-300"
+              className="px-2.5 py-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-medium text-zinc-700 dark:text-zinc-300 focus:outline-none"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -254,14 +247,14 @@ export const FlowsOverviewTrackerView = ({
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center space-x-1 text-xs">
-            <span className="text-[11px] text-slate-400 font-mono">Status:</span>
+          <div className="flex items-center space-x-1.5 text-xs">
+            <span className="text-xs text-zinc-400">Status:</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2.5 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-700 dark:text-slate-300"
+              className="px-2.5 py-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-medium text-zinc-700 dark:text-zinc-300 focus:outline-none"
             >
-              <option value="ALL">All Stages</option>
+              <option value="ALL">All Statuses</option>
               <option value="COMPLETED">100% Completed</option>
               <option value="IN_PROGRESS">In Progress</option>
               <option value="PENDING">Pending (0%)</option>
@@ -270,25 +263,25 @@ export const FlowsOverviewTrackerView = ({
         </div>
       </div>
 
-      {/* Main Flows Progression Cards Matrix */}
+      {/* Main Flows Progression Cards */}
       {filteredFlows.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-3">
-          <GitBranch className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600" />
-          <h3 className="text-sm font-bold text-slate-800 dark:text-white">No Flows Found</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-12 text-center text-zinc-400 space-y-3">
+          <GitBranch className="w-8 h-8 mx-auto text-zinc-300 dark:text-zinc-600" />
+          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">No Flows Found</h3>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
             {searchTerm ? 'No flows match your search criteria.' : 'Create your first data flow to begin tracking pipeline stages.'}
           </p>
           <button
             type="button"
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center space-x-1.5 shadow-sm"
+            className="px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 font-medium text-xs inline-flex items-center space-x-1.5 shadow-xs transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Create Flow</span>
           </button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3.5">
           {filteredFlows.map((flow, index) => {
             const isSelected = flow.id === activeFlowId;
             const stages = flow.stages || {};
@@ -302,66 +295,55 @@ export const FlowsOverviewTrackerView = ({
               { key: 'schema', label: 'Schema', stepId: 2 },
               { key: 'staging', label: 'Staging', stepId: 3 },
               { key: 'transformation', label: 'Transform', stepId: 4 },
-              { key: 'execution', label: 'Runner', stepId: 5 },
+              { key: 'execution', label: 'Execution', stepId: 5 },
             ];
 
             return (
               <div
                 key={flow.id}
-                className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-sm transition-all space-y-4 ${
+                className={`bg-white dark:bg-zinc-900 border rounded-lg p-4 shadow-xs transition-colors space-y-3.5 ${
                   isSelected
-                    ? 'border-indigo-500 ring-2 ring-indigo-500/20 dark:border-indigo-400'
-                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    ? 'border-zinc-900 dark:border-zinc-100 ring-1 ring-zinc-900/10 dark:ring-zinc-100/10'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                 }`}
               >
                 {/* Flow Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
                   <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-mono font-bold text-xs border border-indigo-200 dark:border-indigo-500/20 shrink-0">
+                    <span className="text-xs font-mono font-medium text-zinc-400 dark:text-zinc-500 w-5">
                       #{index + 1}
-                    </div>
+                    </span>
 
                     <div>
                       <div className="flex items-center space-x-2">
-                        <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                           {flow.name}
                         </h3>
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 uppercase">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
                           {flow.category || 'General'}
                         </span>
                         {isSelected && (
-                          <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20">
-                            Active Flow
+                          <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900">
+                            Active
                           </span>
                         )}
                       </div>
 
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center space-x-2">
-                        <span>{flow.description || 'Enterprise Data Pipeline Flow'}</span>
-                        <span>•</span>
-                        <span className="font-mono text-[10px] flex items-center space-x-1">
-                          <Calendar className="w-2.5 h-2.5 text-slate-400" />
-                          <span>Created {creationDate}</span>
-                        </span>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono text-[11px] mt-0.5">
+                        Created {creationDate}
                       </p>
                     </div>
                   </div>
 
-                  {/* Progress Badge */}
+                  {/* Progress Indicator */}
                   <div className="flex items-center space-x-3">
                     <div className="text-right">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white font-mono block">
+                      <span className="text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 block">
                         {flow.completed_stages_count || 0}/5 Stages ({progress}%)
                       </span>
-                      <div className="w-32 bg-slate-100 dark:bg-slate-800 rounded-full h-2 mt-1 overflow-hidden">
+                      <div className="w-28 bg-zinc-100 dark:bg-zinc-800 rounded-full h-1.5 mt-1 overflow-hidden">
                         <div
-                          className={`h-full transition-all duration-500 ${
-                            progress === 100
-                              ? 'bg-emerald-500'
-                              : progress >= 60
-                              ? 'bg-indigo-500'
-                              : 'bg-amber-500'
-                          }`}
+                          className="h-full transition-all duration-300 bg-zinc-900 dark:bg-zinc-100"
                           style={{ width: `${progress}%` }}
                         />
                       </div>
@@ -370,7 +352,7 @@ export const FlowsOverviewTrackerView = ({
                 </div>
 
                 {/* 5-Stage Stepper Progression Tracker */}
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
                   {stageKeys.map((stg, sIdx) => {
                     const stageData = stages[stg.key] || {};
                     const isCompleted = stageData.completed || false;
@@ -383,38 +365,38 @@ export const FlowsOverviewTrackerView = ({
                           if (onSelectFlow) onSelectFlow(flow.id);
                           if (onNavigateToStep) onNavigateToStep(stg.stepId);
                         }}
-                        className={`p-3 rounded-xl border text-xs cursor-pointer transition-all flex flex-col justify-between space-y-2 group ${
+                        className={`p-2.5 rounded-md border text-xs cursor-pointer transition-colors flex flex-col justify-between space-y-1.5 group ${
                           isCompleted
-                            ? 'bg-emerald-50/50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/20 hover:border-emerald-400'
-                            : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 hover:border-slate-400'
+                            ? 'bg-zinc-50/80 dark:bg-zinc-950/60 border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600'
+                            : 'bg-white dark:bg-zinc-900 border-zinc-200/60 dark:border-zinc-800/60 hover:border-zinc-400'
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-1.5 min-w-0">
                             <StageIcon className={`w-3.5 h-3.5 shrink-0 ${
-                              isCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'
+                              isCompleted ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400'
                             }`} />
-                            <span className="font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                            <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate">
                               {sIdx + 1}. {stg.label}
                             </span>
                           </div>
 
                           {isCompleted ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                           ) : (
-                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 shrink-0" />
                           )}
                         </div>
 
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 font-mono">
-                          {stageData.summary || (isCompleted ? 'Stage Ready' : 'Pending Step')}
+                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 line-clamp-1 font-mono">
+                          {stageData.summary || (isCompleted ? 'Completed' : 'Pending')}
                         </p>
 
-                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px] font-mono font-bold">
-                          <span className={isCompleted ? 'text-emerald-600 dark:text-emerald-400 uppercase' : 'text-slate-400 uppercase'}>
-                            {isCompleted ? 'COMPLETED' : 'PENDING'}
+                        <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800/60 flex items-center justify-between text-[10px] font-mono">
+                          <span className={isCompleted ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-zinc-400'}>
+                            {isCompleted ? 'DONE' : 'PENDING'}
                           </span>
-                          <span className="text-indigo-600 dark:text-indigo-400 group-hover:translate-x-0.5 transition-transform flex items-center space-x-0.5">
+                          <span className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors flex items-center space-x-0.5">
                             <span>Open</span>
                             <ArrowRight className="w-2.5 h-2.5" />
                           </span>
@@ -424,37 +406,37 @@ export const FlowsOverviewTrackerView = ({
                   })}
                 </div>
 
-                {/* Bottom Action Footer for Each Flow */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                  <div className="flex items-center space-x-3 text-slate-500 dark:text-slate-400 text-[11px]">
-                    <span>Datasets: <strong className="text-slate-900 dark:text-white font-bold">{flow.dataset_count || 0}</strong></span>
-                    <span>•</span>
-                    <span>Spark Rules: <strong className="text-slate-900 dark:text-white font-bold">{Array.isArray(flow.rules) ? flow.rules.length : 0}</strong></span>
-                    <span>•</span>
-                    <span>Total Rows: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{(flow.total_rows || 0).toLocaleString()}</strong></span>
+                {/* Bottom Action Footer */}
+                <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-mono">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-zinc-500 dark:text-zinc-400 text-xs">
+                    <span>Datasets: <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{flow.dataset_count || 0}</strong></span>
+                    <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                    <span>Rules: <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{Array.isArray(flow.rules) ? flow.rules.length : 0}</strong></span>
+                    <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                    <span>Rows: <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{(flow.total_rows || 0).toLocaleString()}</strong></span>
                   </div>
 
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
                     <button
                       type="button"
                       onClick={() => {
                         if (onSelectFlow) onSelectFlow(flow.id);
                         if (onNavigateToStep) onNavigateToStep(1);
                       }}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center space-x-1 border border-emerald-200 dark:border-emerald-500/30 transition-colors"
-                      title="Connect Data Source for this Flow"
+                      className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1 transition-colors"
+                      title="Connect Data Source"
                     >
-                      <Database className="w-3 h-3 text-emerald-500" />
-                      <span>Connect Source</span>
+                      <Database className="w-3 h-3 text-zinc-500" />
+                      <span>Source</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setSelectedFlowModal(flow)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center space-x-1 transition-colors"
-                      title="Inspect Full Flow Metadata & Logs"
+                      className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1 transition-colors"
+                      title="Flow Details"
                     >
-                      <Info className="w-3 h-3 text-sky-500" />
+                      <Info className="w-3 h-3 text-zinc-500" />
                       <span>Details</span>
                     </button>
 
@@ -464,9 +446,9 @@ export const FlowsOverviewTrackerView = ({
                         if (onSelectFlow) onSelectFlow(flow.id);
                         if (onNavigateToStep) onNavigateToStep(4);
                       }}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center space-x-1 border border-indigo-200 dark:border-indigo-500/30 transition-colors"
+                      className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1 transition-colors"
                     >
-                      <Sliders className="w-3 h-3 text-indigo-500" />
+                      <Sliders className="w-3 h-3 text-zinc-500" />
                       <span>Transform</span>
                     </button>
 
@@ -476,10 +458,10 @@ export const FlowsOverviewTrackerView = ({
                         if (onSelectFlow) onSelectFlow(flow.id);
                         if (onNavigateToStep) onNavigateToStep(5);
                       }}
-                      className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-sky-500 dark:hover:bg-sky-400 text-white font-bold text-xs flex items-center space-x-1 shadow-sm transition-all"
+                      className="flex-1 sm:flex-initial justify-center px-3 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1 shadow-xs transition-colors"
                     >
                       <PlayCircle className="w-3 h-3" />
-                      <span>Run Pipeline</span>
+                      <span>Run</span>
                     </button>
                   </div>
                 </div>
@@ -491,24 +473,24 @@ export const FlowsOverviewTrackerView = ({
 
       {/* CREATE NEW FLOW MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-900 dark:text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg max-w-md w-full p-5 shadow-xl space-y-4 text-zinc-900 dark:text-zinc-100">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
               <div className="flex items-center space-x-2">
-                <GitBranch className="w-4 h-4 text-indigo-500" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Create New Data Flow</h3>
+                <GitBranch className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Create New Data Flow</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {createError && (
-              <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+              <div className="p-2.5 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-400 text-xs flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{createError}</span>
               </div>
@@ -516,23 +498,23 @@ export const FlowsOverviewTrackerView = ({
 
             <form onSubmit={handleCreateFlow} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Flow Name *</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Flow Name *</label>
                 <input
                   type="text"
                   required
-                  placeholder=""
+                  placeholder="e.g. Sales Revenue Pipeline"
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Category</label>
                 <select
                   value={newFlowCategory}
                   onChange={(e) => setNewFlowCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 >
                   <option value="General">General</option>
                   <option value="Finance">Finance</option>
@@ -544,21 +526,21 @@ export const FlowsOverviewTrackerView = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
                 <textarea
                   rows={2}
-                  placeholder=""
+                  placeholder="Optional flow notes or purpose..."
                   value={newFlowDesc}
                   onChange={(e) => setNewFlowDesc(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"
                 />
               </div>
 
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end space-x-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="h-10 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center justify-center transition-colors"
+                  className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium transition-colors"
                 >
                   Cancel
                 </button>
@@ -567,19 +549,19 @@ export const FlowsOverviewTrackerView = ({
                   type="button"
                   disabled={creatingFlow}
                   onClick={(e) => handleCreateFlow(e, false)}
-                  className="h-10 px-3 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center justify-center text-center transition-all disabled:opacity-50"
+                  className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-medium transition-colors disabled:opacity-50"
                 >
-                  <span>Create Flow Only</span>
+                  <span>Create Only</span>
                 </button>
 
                 <button
                   type="button"
                   disabled={creatingFlow}
                   onClick={(e) => handleCreateFlow(e, true)}
-                  className="h-10 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center justify-center space-x-1 shadow-sm transition-all disabled:opacity-50 text-center"
+                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
                 >
-                  <Plus className="w-3.5 h-3.5 shrink-0" />
-                  <span className="leading-tight">{creatingFlow ? 'Creating...' : 'Create & Select Source'}</span>
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{creatingFlow ? 'Creating...' : 'Create & Open'}</span>
                 </button>
               </div>
             </form>
@@ -589,33 +571,33 @@ export const FlowsOverviewTrackerView = ({
 
       {/* FLOW DETAILS MODAL */}
       {selectedFlowModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 text-slate-900 dark:text-slate-100 max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg max-w-xl w-full p-5 shadow-xl space-y-4 text-zinc-900 dark:text-zinc-100 max-h-[85vh] overflow-y-auto">
             {/* Header */}
-            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/20">
-                  <GitBranch className="w-5 h-5" />
+            <div className="flex items-start justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-md bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-700 dark:text-zinc-300">
+                  <GitBranch className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                      {selectedFlowModal.name}
+                    </h3>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
                       {selectedFlowModal.category || 'General'}
                     </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 uppercase font-bold">
-                      {selectedFlowModal.status || 'Active'}
-                    </span>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1">
-                    {selectedFlowModal.name}
-                  </h3>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 font-mono mt-0.5">
+                    ID: {selectedFlowModal.id}
+                  </p>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setSelectedFlowModal(null)}
-                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors"
+                className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -623,30 +605,30 @@ export const FlowsOverviewTrackerView = ({
 
             {/* Description & Overview Grid */}
             <div className="space-y-3">
-              <p className="text-xs text-slate-600 dark:text-slate-400">
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
                 {selectedFlowModal.description || 'No detailed flow description provided.'}
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono">
                 <div>
-                  <span className="text-[10px] text-slate-400 block">FLOW ID</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">{selectedFlowModal.id}</span>
+                  <span className="text-[10px] text-zinc-400 block">FLOW ID</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate block">{selectedFlowModal.id}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">CREATED</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                  <span className="text-[10px] text-zinc-400 block">CREATED</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200 block">
                     {selectedFlowModal.created_at ? new Date(selectedFlowModal.created_at).toLocaleDateString() : 'Initial'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">DATASETS</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
+                  <span className="text-[10px] text-zinc-400 block">DATASETS</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 block">
                     {selectedFlowModal.dataset_count || 0} Attached
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">RULES CONFIGURED</span>
-                  <span className="font-bold text-sky-600 dark:text-sky-400 block">
+                  <span className="text-[10px] text-zinc-400 block">RULES</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 block">
                     {Array.isArray(selectedFlowModal.rules) ? selectedFlowModal.rules.length : 0} Rules
                   </span>
                 </div>
@@ -655,13 +637,13 @@ export const FlowsOverviewTrackerView = ({
 
             {/* Configured Spark Rules in Flow */}
             <div className="space-y-2">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center space-x-1.5">
-                <Sliders className="w-3.5 h-3.5 text-sky-500" />
+              <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center space-x-1.5">
+                <Sliders className="w-3.5 h-3.5 text-zinc-500" />
                 <span>Configured Transformation Rules ({Array.isArray(selectedFlowModal.rules) ? selectedFlowModal.rules.length : 0})</span>
               </h4>
 
               {(!selectedFlowModal.rules || selectedFlowModal.rules.length === 0) ? (
-                <p className="text-xs text-slate-400 font-mono p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-zinc-400 font-mono p-3 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 text-center">
                   No transformation rules configured for this flow yet.
                 </p>
               ) : (
@@ -669,18 +651,18 @@ export const FlowsOverviewTrackerView = ({
                   {selectedFlowModal.rules.map((rule, rIdx) => (
                     <div
                       key={rule.id || rIdx}
-                      className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
+                      className="p-2 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs"
                     >
                       <div className="flex items-center space-x-2">
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 uppercase">
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium">
                           {rule.rule_type}
                         </span>
-                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                        <span className="font-mono text-zinc-700 dark:text-zinc-300">
                           {rule.description || rule.params?.condition || rule.params?.column_name || 'Step'}
                         </span>
                       </div>
-                      <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                        rule.enabled !== false ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-slate-400 bg-slate-100 dark:bg-slate-800'
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                        rule.enabled !== false ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40' : 'text-zinc-400 bg-zinc-100 dark:bg-zinc-800'
                       }`}>
                         {rule.enabled !== false ? 'Enabled' : 'Disabled'}
                       </span>
@@ -691,21 +673,21 @@ export const FlowsOverviewTrackerView = ({
             </div>
 
             {/* Footer Actions */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => handleDeleteFlow(selectedFlowModal.id, selectedFlowModal.name)}
-                className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 text-xs font-semibold flex items-center space-x-1 transition-colors"
+                className="px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900/40 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/60 text-red-700 dark:text-red-400 text-xs font-medium flex items-center space-x-1 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Flow</span>
+                <span>Delete</span>
               </button>
 
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
                   onClick={() => setSelectedFlowModal(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-colors"
+                  className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium text-xs transition-colors"
                 >
                   Close
                 </button>
@@ -717,10 +699,10 @@ export const FlowsOverviewTrackerView = ({
                     if (onNavigateToStep) onNavigateToStep(5);
                     setSelectedFlowModal(null);
                   }}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-sm transition-all"
+                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 font-medium text-xs flex items-center space-x-1.5 shadow-xs transition-colors"
                 >
                   <PlayCircle className="w-3.5 h-3.5" />
-                  <span>Execute in Pipeline Runner</span>
+                  <span>Execute in Runner</span>
                 </button>
               </div>
             </div>

@@ -182,6 +182,7 @@ class RuleType(str, Enum):
     CAST_TYPE = "cast_type"
     DERIVED_COLUMN = "derived_column"
     AGGREGATE = "aggregate"
+    WINDOW_FUNCTION = "window_function"
     DEDUPLICATE = "deduplicate"
     SPARK_SQL = "spark_sql"
     JOIN = "join"

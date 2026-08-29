@@ -143,31 +143,29 @@ export const StagingAreaView = ({
   // ==========================================
   if (!activeDataset) {
     return (
-      <div className="space-y-6 animate-fadeIn">
+      <div className="space-y-5 animate-fadeIn">
         {/* Top Header & Search Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30 shrink-0">
-              <Layers className="w-4 h-4" />
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-900 p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xs transition-colors">
+          <div className="flex items-center space-x-2.5">
+            <Layers className="w-4 h-4 text-zinc-500 shrink-0" />
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Lakehouse Staging Repository</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {datasets.length} persistent staging dataset{datasets.length === 1 ? '' : 's'} across {flows.length} data flows
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staging Repository</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                {datasets.length} staged dataset{datasets.length === 1 ? '' : 's'} across {flows.length} data flows
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:space-x-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:space-x-2">
             {datasets.length > 0 && (
               <div className="relative w-full sm:w-auto">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search stages or flows..."
+                  placeholder="Filter datasets or flows..."
                   value={searchStage}
                   onChange={(e) => setSearchStage(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-full sm:w-52 font-sans"
+                  className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-full sm:w-52 font-sans"
                 />
               </div>
             )}
@@ -175,34 +173,34 @@ export const StagingAreaView = ({
             <button
               type="button"
               onClick={onAddNewSource}
-              className="w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all shrink-0"
+              className="w-full sm:w-auto justify-center px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Connect & Stage Source</span>
+              <span>Connect & Stage</span>
             </button>
           </div>
         </div>
 
         {/* FLOW SELECTOR TABS BAR */}
         {flows.length > 0 && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
             <button
               type="button"
               onClick={() => {
                 setSelectedFlowFilter('all');
                 onSelectFlow && onSelectFlow('all');
               }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 ${
                 selectedFlowFilter === 'all'
-                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                  : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
               }`}
             >
-              <span>⚡ All Flows</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+              <span>All Flows</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
                 selectedFlowFilter === 'all'
-                  ? 'bg-slate-700 text-slate-200 dark:bg-slate-200 dark:text-slate-800'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900'
+                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
               }`}>
                 {getFlowDatasetCount('all')}
               </span>
@@ -219,16 +217,16 @@ export const StagingAreaView = ({
                     setSelectedFlowFilter(flow.id);
                     onSelectFlow && onSelectFlow(flow.id);
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shrink-0 ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 ${
                     isSelected
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                      : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <GitBranch className="w-3.5 h-3.5" />
                   <span>{flow.name}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                    isSelected ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
                   }`}>
                     {count}
                   </span>
@@ -240,12 +238,12 @@ export const StagingAreaView = ({
 
         {/* Saved Stages Cards Grid */}
         {filteredStages.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-12 text-center text-slate-500 dark:text-slate-400 text-xs space-y-3">
-            <FolderOpen className="w-10 h-10 text-slate-400 mx-auto mb-1" />
-            <h3 className="text-sm font-bold text-slate-800 dark:text-white">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-12 text-center text-zinc-500 dark:text-zinc-400 text-xs space-y-3">
+            <FolderOpen className="w-8 h-8 text-zinc-400 mx-auto mb-1" />
+            <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
               {datasets.length === 0 ? 'No Staged Datasets Yet' : 'No Datasets In This Flow'}
             </h3>
-            <p className="max-w-sm mx-auto text-slate-400">
+            <p className="max-w-sm mx-auto text-zinc-400">
               {datasets.length === 0
                 ? 'Connect a data source, customize schema types, and stage it into the Lakehouse.'
                 : 'This flow currently has no staged datasets. Connect a data source to attach data.'}
@@ -253,44 +251,44 @@ export const StagingAreaView = ({
             <button
               type="button"
               onClick={onAddNewSource}
-              className="mt-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 font-bold inline-flex items-center space-x-1.5 shadow-sm"
+              className="mt-2 px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 font-medium inline-flex items-center space-x-1.5 shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Connect & Stage Data</span>
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredStages.map((ds) => {
               const flowObj = flows.find((f) => f.id === ds.flow_id);
               return (
                 <div
                   key={ds.id}
                   onClick={() => handleSelectStage(ds)}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-900 dark:hover:border-sky-500 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4"
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-lg p-4 shadow-xs transition-colors cursor-pointer flex flex-col justify-between group space-y-3.5"
                 >
                   <div>
                     {/* Top Badges: Flow Badge & Source Type */}
                     <div className="flex items-center justify-between gap-1 mb-2">
                       {flowObj ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20 truncate max-w-[170px]">
-                          <GitBranch className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 truncate max-w-[170px]">
+                          <GitBranch className="w-3 h-3 text-zinc-400 shrink-0" />
                           <span className="truncate">{flowObj.name}</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                           General
                         </span>
                       )}
 
                       <div className="flex items-center space-x-1 shrink-0">
-                        <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                           {ds.source_type}
                         </span>
                         <button
                           type="button"
                           onClick={(e) => handleDeleteStage(ds.id, e)}
-                          className="text-slate-400 hover:text-rose-600 p-0.5"
+                          className="text-zinc-400 hover:text-red-600 p-0.5 transition-colors"
                           title="Delete staged dataset"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -299,29 +297,29 @@ export const StagingAreaView = ({
                     </div>
 
                     <div className="flex items-center space-x-2 min-w-0 pr-1">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/20 shrink-0">
+                      <div className="w-6 h-6 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
                         <HardDrive className="w-3.5 h-3.5" />
                       </div>
-                      <span className="font-bold text-xs text-slate-900 dark:text-white truncate group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
+                      <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">
                         {ds.name}
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 line-clamp-2">
                       {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
                     </p>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 space-x-2">
-                      <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{ds.row_count.toLocaleString()}</strong> rows
+                  <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between">
+                    <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 space-x-1.5">
+                      <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{ds.row_count.toLocaleString()}</strong> rows
                       <span>•</span>
                       <span>{ds.column_count} cols</span>
                     </div>
 
-                    <span className="text-xs font-bold text-slate-900 dark:text-sky-400 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
-                      <span>Inspect Data</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
+                    <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
+                      <span>Inspect</span>
+                      <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                 </div>
@@ -337,14 +335,14 @@ export const StagingAreaView = ({
   // LEVEL 2: DEDICATED STAGE DETAILS & PREVIEW
   // ==========================================
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-5 animate-fadeIn">
       {/* Top Navigation Bar with Back Button */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-4 shadow-sm transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 shadow-xs transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={handleBackToGallery}
-            className="p-1.5 sm:p-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center space-x-1 text-xs font-semibold shrink-0 mt-0.5 sm:mt-0"
+            className="p-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors flex items-center space-x-1 text-xs font-medium shrink-0 mt-0.5 sm:mt-0"
             title="Back to all stages"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
@@ -352,13 +350,13 @@ export const StagingAreaView = ({
           </button>
 
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5 mb-1">
-              <span className="text-[9px] sm:text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 uppercase shrink-0">
-                MYSQL STAGE TABLE
+            <div className="flex items-center space-x-2 mb-0.5">
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 uppercase shrink-0">
+                STAGE TABLE
               </span>
             </div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate block">{activeDataset.name}</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 truncate">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white truncate block">{activeDataset.name}</h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 truncate">
               ID: {activeDataset.id} • {activeDataset.row_count.toLocaleString()} rows • {activeDataset.column_count} cols
             </p>
           </div>
@@ -368,33 +366,33 @@ export const StagingAreaView = ({
           <button
             type="button"
             onClick={(e) => handleDeleteStage(activeDataset.id, e)}
-            className="flex-1 sm:flex-initial justify-center px-3 py-2 sm:py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center space-x-1 transition-colors"
+            className="flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900/40 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/60 text-xs font-medium text-red-700 dark:text-red-400 flex items-center space-x-1 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete Stage</span>
+            <span>Delete</span>
           </button>
 
           <button
             type="button"
             onClick={() => onSelectDatasetForTransform(activeDataset)}
-            className="flex-1 sm:flex-initial justify-center px-4 py-2 sm:py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all"
+            className="flex-1 sm:flex-initial justify-center px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Transform Stage</span>
+            <span>Transform</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
       {/* Sub-Tabs: Data Preview, Schema & Types, Lineage Metadata */}
-      <div className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-fit overflow-x-auto whitespace-nowrap -webkit-overflow-scrolling-touch">
+      <div className="flex items-center space-x-1 bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-md border border-zinc-200 dark:border-zinc-700/60 w-full sm:w-fit overflow-x-auto whitespace-nowrap">
         <button
           type="button"
           onClick={() => setActiveTab('preview')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 ${
             activeTab === 'preview'
-              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
           }`}
         >
           <TableIcon className="w-3.5 h-3.5" />
@@ -404,10 +402,10 @@ export const StagingAreaView = ({
         <button
           type="button"
           onClick={() => setActiveTab('schema')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 ${
             activeTab === 'schema'
-              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
           }`}
         >
           <FileCode className="w-3.5 h-3.5" />
@@ -417,14 +415,14 @@ export const StagingAreaView = ({
         <button
           type="button"
           onClick={() => setActiveTab('lineage')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 ${
             activeTab === 'lineage'
-              ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
           }`}
         >
           <Info className="w-3.5 h-3.5" />
-          <span>Stage Lineage & File Metadata</span>
+          <span>Lineage & Metadata</span>
         </button>
       </div>
 
@@ -432,7 +430,7 @@ export const StagingAreaView = ({
       {activeTab === 'preview' && previewData && (
         <DataGrid
           title={`Stage Preview: ${activeDataset.name}`}
-          subtitle={`Stored in MySQL Database Table • ${previewData.total_rows.toLocaleString()} total rows across ${activeDataset.column_count} columns`}
+          subtitle={`Stored Lakehouse Dataset • ${previewData.total_rows.toLocaleString()} rows • ${activeDataset.column_count} columns`}
           columns={activeDataset.columns}
           rows={previewData.rows}
           totalRows={previewData.total_rows}
@@ -444,35 +442,35 @@ export const StagingAreaView = ({
 
       {/* 2. SCHEMA & TYPES TAB */}
       {activeTab === 'schema' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm transition-colors">
-          <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-            <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-xs transition-colors">
+          <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800">
+            <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
               Column Schema & Data Types Profile
             </h4>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse font-mono text-xs">
-              <thead className="bg-slate-100 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-400">
+              <thead className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-xs font-medium text-zinc-600 dark:text-zinc-400">
                 <tr>
-                  <th className="py-2.5 px-3">Column Name</th>
-                  <th className="py-2.5 px-3">Spark Data Type</th>
-                  <th className="py-2.5 px-3">Nullable</th>
-                  <th className="py-2.5 px-3">Null Count</th>
-                  <th className="py-2.5 px-3">Distinct Count</th>
+                  <th className="py-2 px-3">Column Name</th>
+                  <th className="py-2 px-3">Spark Data Type</th>
+                  <th className="py-2 px-3">Nullable</th>
+                  <th className="py-2 px-3">Null Count</th>
+                  <th className="py-2 px-3">Distinct Count</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/40">
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
                 {activeDataset.columns.map((col) => (
-                  <tr key={col.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white font-sans">{col.name}</td>
+                  <tr key={col.name} className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30">
+                    <td className="py-2 px-3 font-medium text-zinc-900 dark:text-white font-sans">{col.name}</td>
                     <td className="py-2 px-3">
-                      <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400 font-bold text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono text-xs">
                         {col.spark_type}
                       </span>
                     </td>
-                    <td className="py-2 px-3 text-slate-500">{col.nullable ? 'Yes' : 'No'}</td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-300">{col.null_count || 0}</td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-300">{col.distinct_count || 'N/A'}</td>
+                    <td className="py-2 px-3 text-zinc-500">{col.nullable ? 'Yes' : 'No'}</td>
+                    <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">{col.null_count || 0}</td>
+                    <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">{col.distinct_count || 'N/A'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -483,44 +481,44 @@ export const StagingAreaView = ({
 
       {/* 3. STAGE LINEAGE & METADATA TAB */}
       {activeTab === 'lineage' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4 transition-colors">
-          <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-3.5 transition-colors">
+          <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
             Stage Lineage & Storage Information
           </h4>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
-              <span className="font-semibold text-slate-700 dark:text-slate-300 block font-sans">Storage Metadata</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs font-mono">
+            <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+              <span className="font-medium text-zinc-900 dark:text-zinc-100 block font-sans">Storage Metadata</span>
               <div className="flex justify-between">
-                <span className="text-slate-500">Storage Engine:</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold">MYSQL TABLE</span>
+                <span className="text-zinc-500">Storage Engine:</span>
+                <span className="text-zinc-900 dark:text-zinc-100 font-medium">MYSQL TABLE</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Storage Format:</span>
-                <span className="text-slate-800 dark:text-slate-200 uppercase">{activeDataset.storage_format}</span>
+                <span className="text-zinc-500">Storage Format:</span>
+                <span className="text-zinc-800 dark:text-zinc-200 uppercase">{activeDataset.storage_format}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Created:</span>
-                <span className="text-slate-800 dark:text-slate-200">{new Date(activeDataset.created_at).toLocaleString()}</span>
+                <span className="text-zinc-500">Created:</span>
+                <span className="text-zinc-800 dark:text-zinc-200">{new Date(activeDataset.created_at).toLocaleString()}</span>
               </div>
             </div>
 
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
-              <span className="font-semibold text-slate-700 dark:text-slate-300 block font-sans">Source Provenance</span>
+            <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+              <span className="font-medium text-zinc-900 dark:text-zinc-100 block font-sans">Source Provenance</span>
               <div className="flex justify-between">
-                <span className="text-slate-500">Source Type:</span>
-                <span className="text-sky-600 dark:text-sky-400 font-bold uppercase">{activeDataset.source_type}</span>
+                <span className="text-zinc-500">Source Type:</span>
+                <span className="text-zinc-900 dark:text-zinc-100 font-medium uppercase">{activeDataset.source_type}</span>
               </div>
               <div>
-                <span className="text-slate-500 block mb-0.5">Summary:</span>
-                <p className="text-slate-800 dark:text-slate-200 truncate">{activeDataset.source_summary || 'N/A'}</p>
+                <span className="text-zinc-500 block mb-0.5">Summary:</span>
+                <p className="text-zinc-800 dark:text-zinc-200 truncate">{activeDataset.source_summary || 'N/A'}</p>
               </div>
             </div>
           </div>
 
           <div>
-            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">Database Table URI:</span>
-            <pre className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-sky-300 font-mono text-[11px] truncate">
+            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300 block mb-1">Database Table URI:</span>
+            <pre className="p-2.5 bg-zinc-950 rounded-md border border-zinc-800 text-zinc-300 font-mono text-xs truncate">
               {activeDataset.storage_path}
             </pre>
           </div>

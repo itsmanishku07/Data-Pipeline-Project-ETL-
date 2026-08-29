@@ -65,6 +65,48 @@ def list_database_tables(request: SourceConnectionRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch database tables: {str(e)}")
 
+@router.post("/azure/browse")
+def browse_azure_container(payload: Dict[str, Any]):
+    """
+    Browse folders and files in an Azure Lakehouse container.
+    """
+    try:
+        from ..models.schemas import AzureLakehouseConfig, FileFormat
+        from ..connectors.azure_connector import AzureLakehouseConnector
+        
+        account_name = (payload.get("account_name") or "").strip()
+        container_name = (payload.get("container_name") or "").strip()
+        account_key = payload.get("account_key")
+        connection_string = payload.get("connection_string")
+        prefix = payload.get("prefix", "")
+
+        if not account_name:
+            raise HTTPException(status_code=400, detail="Azure Storage Account Name is required.")
+        if not container_name:
+            raise HTTPException(status_code=400, detail="Azure Container Name is required.")
+        
+        cfg = AzureLakehouseConfig(
+            account_name=account_name,
+            container_name=container_name,
+            account_key=account_key,
+            connection_string=connection_string,
+            path=prefix or "data.parquet",
+            file_format=FileFormat.PARQUET
+        )
+        
+        connector = AzureLakehouseConnector(cfg)
+        hierarchy = connector.list_hierarchy(prefix=prefix)
+        return {
+            "success": True,
+            "account_name": account_name,
+            "container_name": container_name,
+            **hierarchy
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/inspect", response_model=SchemaInspectionResult)
 def inspect_source(request: SourceConnectionRequest, background_tasks: BackgroundTasks, limit: int = 100):
     start_t = time.time()

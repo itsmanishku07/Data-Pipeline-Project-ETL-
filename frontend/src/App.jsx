@@ -262,7 +262,7 @@ export const App = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans transition-colors duration-200 antialiased overflow-hidden">
+    <div className="h-screen w-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex font-sans transition-colors duration-150 antialiased overflow-hidden">
       {/* Left Modern Sidebar (Desktop + Mobile Sliding Drawer) */}
       <Sidebar
         currentStep={currentStep}
@@ -290,7 +290,7 @@ export const App = () => {
           onToggleSidebar={toggleSidebar}
         />
 
-        <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 pb-20 md:pb-6">
+        <main className="flex-1 w-full px-4 sm:px-8 py-6 pb-24 md:pb-8">
           {currentStep === 0 && (
             <FlowsOverviewTrackerView
               flows={flows}
@@ -379,8 +379,8 @@ export const App = () => {
         </main>
       </div>
 
-      {/* Mobile Bottom Navigation Bar (Ultra Fast 1-Tap Mobile Switching) */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 z-30 md:hidden flex items-center justify-between px-1.5 py-1 safe-area-pb shadow-lg">
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="fixed bottom-0 inset-x-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200 dark:border-zinc-800 z-30 md:hidden flex items-center justify-between px-2 py-1.5 safe-area-pb">
         {mobileNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentStep === item.id;
@@ -392,18 +392,18 @@ export const App = () => {
               type="button"
               onClick={() => isAccessible && goToStep(item.id)}
               disabled={!isAccessible}
-              className={`flex-1 min-w-[40px] max-w-[56px] flex flex-col items-center justify-center py-1 px-0.5 rounded-lg transition-all ${
+              className={`flex-1 min-w-[42px] max-w-[58px] flex flex-col items-center justify-center py-1 px-1 rounded-md transition-colors ${
                 isActive
-                  ? 'text-sky-600 dark:text-sky-400 font-bold'
+                  ? 'text-zinc-900 dark:text-zinc-100 font-semibold'
                   : isAccessible
-                  ? 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  : 'text-slate-300 dark:text-slate-700 opacity-40 cursor-not-allowed'
+                  ? 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
+                  : 'text-zinc-300 dark:text-zinc-700 opacity-40 cursor-not-allowed'
               }`}
             >
-              <div className={`p-1 rounded-md ${isActive ? 'bg-sky-50 dark:bg-sky-500/10' : ''}`}>
-                <Icon className="w-3.5 h-3.5" />
+              <div className={`p-1 rounded-md ${isActive ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}>
+                <Icon className="w-4 h-4" />
               </div>
-              <span className="text-[9px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
+              <span className="text-[10px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
             </button>
           );
         })}

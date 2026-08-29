@@ -20,9 +20,14 @@ import {
   Server,
   Search,
   CheckSquare,
-  Square
+  Square,
+  Folder,
+  FolderOpen,
+  FileText,
+  ChevronRight,
+  CornerDownRight
 } from 'lucide-react';
-import { DataFlowAPI } from '../../services/api';
+import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 
 const sourceEngines = [
   { id: 'mysql', name: 'MySQL', icon: Database },
@@ -102,11 +107,19 @@ export const SourceConnectorView = ({
   const [s3SecretKey, setS3SecretKey] = useState('');
   const [s3Region, setS3Region] = useState('us-east-1');
 
-  // Cloud Azure Fields
+  // Cloud Azure Fields & Interactive Browser
   const [azureAccount, setAzureAccount] = useState('');
   const [azureContainer, setAzureContainer] = useState('');
   const [azurePath, setAzurePath] = useState('');
   const [azureKey, setAzureKey] = useState('');
+  const [azureFormat, setAzureFormat] = useState('parquet');
+  const [azurePrefix, setAzurePrefix] = useState('');
+  const [azureFolders, setAzureFolders] = useState([]);
+  const [azureFiles, setAzureFiles] = useState([]);
+  const [azureBrowsing, setAzureBrowsing] = useState(false);
+  const [azureExplorerOpen, setAzureExplorerOpen] = useState(false);
+  const [azureSearchTerm, setAzureSearchTerm] = useState('');
+  const [azureIsSimulated, setAzureIsSimulated] = useState(false);
 
   // File Upload
   const [uploadedFileInfo, setUploadedFileInfo] = useState(null);
@@ -191,6 +204,52 @@ export const SourceConnectorView = ({
     }
   };
 
+  const handleBrowseAzure = async (targetPrefix = '') => {
+    const acc = (azureAccount || '').trim();
+    const cont = (azureContainer || '').trim();
+    if (!acc) {
+      setError('Please enter your Azure Storage Account Name.');
+      return;
+    }
+    if (!cont) {
+      setError('Please enter your Azure Container Name.');
+      return;
+    }
+
+    setAzureBrowsing(true);
+    setError(null);
+    try {
+      const res = await DataFlowAPI.browseAzureContainer({
+        account_name: acc,
+        container_name: cont,
+        account_key: azureKey.trim() || undefined,
+        prefix: targetPrefix,
+      });
+      setAzureFolders(res.folders || []);
+      setAzureFiles(res.files || []);
+      setAzurePrefix(res.current_prefix || '');
+      setAzureExplorerOpen(true);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to browse Azure Lakehouse'));
+    } finally {
+      setAzureBrowsing(false);
+    }
+  };
+
+  const handleSelectAzureFile = (file) => {
+    setAzurePath(file.path);
+    const fmt = (file.format || '').toLowerCase();
+    if (['parquet', 'delta', 'csv', 'json'].includes(fmt)) {
+      setAzureFormat(fmt);
+    } else if (file.path.endsWith('.parquet')) {
+      setAzureFormat('parquet');
+    } else if (file.path.endsWith('.csv')) {
+      setAzureFormat('csv');
+    } else if (file.path.endsWith('.json')) {
+      setAzureFormat('json');
+    }
+  };
+
   const buildRequest = () => {
     if (['postgresql', 'mysql', 'sqlserver'].includes(activeSource)) {
       const targetName = isCustomSql 
@@ -232,6 +291,7 @@ export const SourceConnectorView = ({
           container_name: azureContainer.trim(),
           path: azurePath.trim(),
           account_key: azureKey.trim() || undefined,
+          file_format: azureFormat,
         },
       };
     } else if (activeSource === 'upload') {
@@ -264,7 +324,7 @@ export const SourceConnectorView = ({
         config = { s3Bucket, s3Key, s3Format, s3AccessKey, s3SecretKey, s3Region };
       } else if (activeSource === 'azure') {
         summary = `adls://${azureAccount}/${azureContainer}/${azurePath}`;
-        config = { azureAccount, azureContainer, azurePath, azureKey };
+        config = { azureAccount, azureContainer, azurePath, azureKey, azureFormat };
       } else if (activeSource === 'upload') {
         summary = uploadedFileInfo ? uploadedFileInfo.filename : 'File Upload';
         config = { uploadedFileInfo };
@@ -280,7 +340,7 @@ export const SourceConnectorView = ({
       setSaveSuccessMsg(`Connection '${connectionName}' saved successfully!`);
       fetchSavedConnections();
     } catch (err) {
-      setError(err?.response?.data?.detail || err.message || 'Failed to save connection');
+      setError(extractErrorMessage(err, 'Failed to save connection'));
     }
   };
 
@@ -313,6 +373,7 @@ export const SourceConnectorView = ({
       setAzureContainer(cfg.azureContainer || '');
       setAzurePath(cfg.azurePath || '');
       setAzureKey(cfg.azureKey || '');
+      setAzureFormat(cfg.azureFormat || 'parquet');
     } else if (saved.source_type === 'upload') {
       setUploadedFileInfo(cfg.uploadedFileInfo || null);
     }
@@ -403,45 +464,45 @@ export const SourceConnectorView = ({
 
   if (flows.length === 0 || !activeFlowId) {
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 sm:p-12 text-center max-w-xl mx-auto space-y-5 shadow-sm animate-fadeIn my-6">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto border border-indigo-200 dark:border-indigo-500/20">
-          <GitBranch className="w-6 h-6" />
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-8 text-center max-w-lg mx-auto space-y-4 shadow-xs animate-fadeIn my-8">
+        <div className="w-10 h-10 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center mx-auto">
+          <GitBranch className="w-5 h-5" />
         </div>
         <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             Create a Data Flow First
           </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-            Every data source, schema, staging table, and transformation belongs to an isolated Data Flow. Please create your Flow to begin ingesting sources.
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
+            Every data source, schema, staging table, and transformation is isolated inside a Data Flow.
           </p>
         </div>
 
         {flowCreateError && (
-          <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+          <div className="p-2.5 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-400 text-xs flex items-center space-x-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{flowCreateError}</span>
           </div>
         )}
 
-        <form onSubmit={handleCreateFlowSubmit} className="space-y-3 text-left p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
+        <form onSubmit={handleCreateFlowSubmit} className="space-y-3 text-left p-4 bg-zinc-50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Flow Name *</label>
+            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Flow Name *</label>
             <input
               type="text"
               required
-              placeholder=""
+              placeholder="e.g. Sales Revenue Pipeline"
               value={newFlowName}
               onChange={(e) => setNewFlowName(e.target.value)}
-              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Category</label>
               <select
                 value={newFlowCategory}
                 onChange={(e) => setNewFlowCategory(e.target.value)}
-                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+                className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
               >
                 <option value="General">General</option>
                 <option value="Finance">Finance</option>
@@ -452,32 +513,32 @@ export const SourceConnectorView = ({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description (Optional)</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="Optional notes"
                 value={newFlowDesc}
                 onChange={(e) => setNewFlowDesc(e.target.value)}
-                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-sans"
+                className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={creatingFlow}
-            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-sm transition-all disabled:opacity-50 mt-2"
+            className="w-full py-2 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 font-medium text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50 mt-2"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>{creatingFlow ? 'Creating Flow...' : 'Create Flow & Select Data Source'}</span>
+            <span>{creatingFlow ? 'Creating Flow...' : 'Create Flow & Select Source'}</span>
           </button>
         </form>
 
         {flows.length > 0 && (
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center space-x-2 text-xs">
-            <span className="text-slate-400">Or select an existing flow:</span>
+          <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-center space-x-2 text-xs">
+            <span className="text-zinc-500">Or select an existing flow:</span>
             <select
               onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
-              className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-800 dark:text-slate-200"
+              className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-medium text-zinc-900 dark:text-zinc-100"
             >
               <option value="">Choose Flow...</option>
               {flows.map((f) => (
@@ -491,32 +552,27 @@ export const SourceConnectorView = ({
   }
 
   return (
-    <div className="space-y-6 animate-fadeIn">
-      {/* ACTIVE FLOW TARGET BANNER */}
-      <div className="bg-gradient-to-r from-indigo-900/40 via-slate-900 to-indigo-950/30 border border-indigo-500/30 rounded-xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-        <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0 mt-0.5 sm:mt-0">
-            <GitBranch className="w-4 h-4" />
-          </div>
+    <div className="space-y-5 animate-fadeIn">
+      {/* TARGET FLOW BAR */}
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center space-x-2.5 min-w-0">
+          <GitBranch className="w-4 h-4 text-zinc-500 shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-mono uppercase font-bold text-indigo-400">Target Flow:</span>
-              <strong className="text-xs sm:text-sm font-bold text-white truncate max-w-[140px] sm:max-w-none">{currentFlow?.name || 'Active Flow'}</strong>
-              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 uppercase font-bold shrink-0">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-zinc-400 font-medium">Target Flow:</span>
+              <strong className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{currentFlow?.name || 'Active Flow'}</strong>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
                 {currentFlow?.category || 'General'}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-              All tables and ingested data will be scoped exclusively to this Flow.
-            </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 w-full sm:w-auto mt-1 sm:mt-0">
+        <div className="flex items-center space-x-2 w-full sm:w-auto">
           <select
             value={activeFlowId || ''}
             onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
-            className="flex-1 sm:flex-none px-2.5 py-1.5 bg-slate-800 text-xs font-mono font-bold text-white rounded-lg border border-slate-700 focus:outline-none min-w-0 truncate"
+            className="flex-1 sm:flex-none px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 text-xs font-medium text-zinc-900 dark:text-zinc-100 rounded-md border border-zinc-200 dark:border-zinc-800 focus:outline-none min-w-0 truncate"
           >
             {flows.map((f) => (
               <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
@@ -525,7 +581,7 @@ export const SourceConnectorView = ({
           <button
             type="button"
             onClick={() => setShowCreateFlowModal(true)}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1 transition-colors"
+            className="shrink-0 px-3 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1 transition-colors shadow-xs"
             title="Create New Flow"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -536,24 +592,24 @@ export const SourceConnectorView = ({
 
       {/* CREATE FLOW MODAL */}
       {showCreateFlowModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-900 dark:text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg max-w-md w-full p-5 shadow-xl space-y-4 text-zinc-900 dark:text-zinc-100">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
               <div className="flex items-center space-x-2">
-                <GitBranch className="w-4 h-4 text-indigo-500" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Create New Flow & Select Source</h3>
+                <GitBranch className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Create New Flow & Select Source</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCreateFlowModal(false)}
-                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {flowCreateError && (
-              <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+              <div className="p-2.5 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-400 text-xs flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{flowCreateError}</span>
               </div>
@@ -561,23 +617,23 @@ export const SourceConnectorView = ({
 
             <form onSubmit={handleCreateFlowSubmit} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Flow Name *</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Flow Name *</label>
                 <input
                   type="text"
                   required
-                  placeholder=""
+                  placeholder="e.g. Sales Revenue Pipeline"
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Category</label>
                 <select
                   value={newFlowCategory}
                   onChange={(e) => setNewFlowCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 >
                   <option value="General">General</option>
                   <option value="Finance">Finance</option>
@@ -589,21 +645,21 @@ export const SourceConnectorView = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
                 <textarea
                   rows={2}
-                  placeholder=""
+                  placeholder="Optional flow notes..."
                   value={newFlowDesc}
                   onChange={(e) => setNewFlowDesc(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-sans text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"
                 />
               </div>
 
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end space-x-2">
+              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end space-x-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateFlowModal(false)}
-                  className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                  className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium transition-colors"
                 >
                   Cancel
                 </button>
@@ -611,7 +667,7 @@ export const SourceConnectorView = ({
                 <button
                   type="submit"
                   disabled={creatingFlow}
-                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1 shadow-sm disabled:opacity-50"
+                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1 shadow-xs transition-colors disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>{creatingFlow ? 'Creating...' : 'Create Flow'}</span>
@@ -624,23 +680,21 @@ export const SourceConnectorView = ({
 
       {/* CONNECTED DATA SOURCES FOR THIS FLOW */}
       {flowDatasets.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-4 animate-fadeIn">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div className="flex items-start sm:items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30 shrink-0 mt-0.5 sm:mt-0">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-3.5 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
               <div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                  <h4 className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     Connected Source for {currentFlow?.name || 'this Flow'}
                   </h4>
-                  <span className="text-[9px] sm:text-[10px] font-mono font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20 uppercase whitespace-nowrap">
-                    Stage Completed ({flowDatasets.length} {flowDatasets.length === 1 ? 'Dataset' : 'Datasets'})
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                    {flowDatasets.length} {flowDatasets.length === 1 ? 'Dataset' : 'Datasets'}
                   </span>
                 </div>
-                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
-                  Source data is already ingested and staged in the lakehouse layer for this Flow.
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Source data is ingested and staged in the lakehouse layer.
                 </p>
               </div>
             </div>
@@ -649,7 +703,7 @@ export const SourceConnectorView = ({
               <button
                 type="button"
                 onClick={() => onNavigateToStep && onNavigateToStep(3)}
-                className="w-full sm:w-auto px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-sm transition-all"
+                className="w-full sm:w-auto px-3.5 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center justify-center space-x-1.5 shadow-xs transition-colors"
               >
                 <Layers className="w-3.5 h-3.5 shrink-0" />
                 <span>View Staged Lakehouse Data</span>
@@ -664,42 +718,42 @@ export const SourceConnectorView = ({
               return (
                 <div 
                   key={ds.id}
-                  className="p-3.5 rounded-xl border border-emerald-200/60 dark:border-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/10 space-y-3"
+                  className="p-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 space-y-2.5"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <Database className="w-4 h-4 text-zinc-500 shrink-0" />
                       <div>
-                        <span className="text-xs font-bold text-slate-900 dark:text-white block font-mono">
+                        <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 block font-mono">
                           {ds.name}
                         </span>
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                          Dataset ID: {ds.id}
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
+                          ID: {ds.id}
                         </span>
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 uppercase border border-emerald-200 dark:border-emerald-800">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
                       {ds.source_type || 'Database'}
                     </span>
                   </div>
 
                   {/* METRIC BADGES */}
-                  <div className="grid grid-cols-3 gap-2 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/60 dark:border-slate-800/60 text-center font-mono text-[11px]">
+                  <div className="grid grid-cols-3 gap-2 p-2 bg-white dark:bg-zinc-900 rounded border border-zinc-200/80 dark:border-zinc-800/80 text-center font-mono text-xs">
                     <div>
-                      <span className="text-[9px] text-slate-400 block uppercase">Rows Ingested</span>
-                      <strong className="text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                      <span className="text-[10px] text-zinc-400 block">ROWS</span>
+                      <strong className="text-zinc-900 dark:text-zinc-100 font-medium">
                         {(ds.row_count || 0).toLocaleString()}
                       </strong>
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-400 block uppercase">Columns</span>
-                      <strong className="text-slate-800 dark:text-slate-200 font-bold text-xs">
+                      <span className="text-[10px] text-zinc-400 block">COLUMNS</span>
+                      <strong className="text-zinc-900 dark:text-zinc-100 font-medium">
                         {cols.length}
                       </strong>
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-400 block uppercase">Stage Status</span>
-                      <strong className="text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                      <span className="text-[10px] text-zinc-400 block">STATUS</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-medium">
                         READY
                       </strong>
                     </div>
@@ -708,14 +762,14 @@ export const SourceConnectorView = ({
                   {/* COLUMNS CHIPS PREVIEW */}
                   {cols.length > 0 && (
                     <div className="space-y-1">
-                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block font-mono uppercase">
-                        Ingested Schema Columns:
+                      <span className="text-[10px] font-medium text-zinc-400 block font-mono uppercase">
+                        Columns:
                       </span>
                       <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
                         {cols.map((c, cIdx) => (
                           <span
                             key={cIdx}
-                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800"
                           >
                             {typeof c === 'string' ? c : (c.name || c.column_name)}
                           </span>
@@ -724,24 +778,20 @@ export const SourceConnectorView = ({
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-200/60 dark:border-slate-800/60 font-mono">
-                    <span>Ingested: {new Date(ds.created_at || Date.now()).toLocaleString()}</span>
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 font-mono">
+                    <span>Ingested: {new Date(ds.created_at || Date.now()).toLocaleDateString()}</span>
                     <button
                       type="button"
                       onClick={() => onNavigateToStep && onNavigateToStep(4)}
-                      className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5"
+                      className="text-xs font-medium text-zinc-900 dark:text-zinc-100 hover:underline flex items-center space-x-0.5"
                     >
-                      <span>Go to Transform</span>
+                      <span>Transform</span>
                       <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
               );
             })}
-          </div>
-
-          <div className="pt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
-            <span>Need to connect another source table to this Flow? Configure below:</span>
           </div>
         </div>
       )}
@@ -758,17 +808,17 @@ export const SourceConnectorView = ({
               key={engine.id}
               type="button"
               onClick={() => handleSourceSelect(engine.id)}
-              className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center space-y-1.5 relative ${
+              className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1.5 relative ${
                 isActive
-                  ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-white border-slate-900 dark:border-sky-500 shadow-sm'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`} />
-              <span className="text-xs font-semibold">{engine.name}</span>
+              <Icon className={`w-4 h-4 ${isActive ? 'text-white dark:text-zinc-900' : 'text-zinc-400 dark:text-zinc-500'}`} />
+              <span className="text-xs font-medium">{engine.name}</span>
               {count > 0 && (
-                <span className={`text-[9px] font-mono font-bold px-1.5 rounded-full ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-sky-600 dark:text-sky-400'
+                <span className={`text-[10px] font-mono px-1.5 rounded ${
+                  isActive ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
                 }`}>
                   {count} saved
                 </span>
@@ -780,31 +830,31 @@ export const SourceConnectorView = ({
 
       {/* 2. SAVED CONNECTIONS FOR THIS SOURCE */}
       {savedConnections.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm space-y-3 transition-colors">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs space-y-3 transition-colors">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <BookmarkCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              <BookmarkCheck className="w-4 h-4 text-zinc-500" />
+              <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
                 Saved {activeSource.toUpperCase()} Connections ({filteredSaved.length})
               </h4>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">Click to load credentials</span>
+            <span className="text-xs text-zinc-400">Click to load</span>
           </div>
 
           {filteredSaved.length === 0 ? (
-            <p className="text-xs text-slate-400 py-2">No saved connections for {activeSource.toUpperCase()} yet. Fill the form below and click "Save Connection".</p>
+            <p className="text-xs text-zinc-400 py-1">No saved connections for {activeSource.toUpperCase()} yet.</p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {filteredSaved.map((conn) => (
                 <div
                   key={conn.id}
                   onClick={() => handleLoadSavedConnection(conn)}
-                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:border-sky-500 dark:hover:border-sky-500 cursor-pointer transition-all flex flex-col justify-between group space-y-2"
+                  className="p-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 hover:border-zinc-400 dark:hover:border-zinc-600 cursor-pointer transition-colors flex flex-col justify-between group space-y-1.5"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-1.5 min-w-0 pr-1">
-                      <Server className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                      <span className="font-bold text-xs text-slate-900 dark:text-white truncate group-hover:text-sky-600 dark:group-hover:text-sky-400">
+                      <Server className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                      <span className="font-medium text-xs text-zinc-900 dark:text-zinc-100 truncate">
                         {conn.name}
                       </span>
                     </div>
@@ -812,23 +862,23 @@ export const SourceConnectorView = ({
                     <button
                       type="button"
                       onClick={(e) => handleDeleteSavedConnection(conn.id, e)}
-                      className="text-slate-400 hover:text-rose-600 p-0.5 shrink-0"
+                      className="text-zinc-400 hover:text-red-600 p-0.5 shrink-0 transition-colors"
                       title="Delete saved connection"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
 
-                  <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                  <p className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 truncate">
                     {conn.summary || 'Database connection'}
                   </p>
 
-                  <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-200/60 dark:border-slate-800/60 font-mono">
-                    <span className="px-1 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 uppercase">
+                  <div className="flex items-center justify-between text-[10px] pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60 font-mono">
+                    <span className="px-1.5 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 uppercase">
                       {conn.source_type}
                     </span>
-                    <span className="text-sky-600 dark:text-sky-400 font-bold group-hover:underline">
-                      Load & Connect →
+                    <span className="text-zinc-900 dark:text-zinc-100 font-medium group-hover:underline">
+                      Load →
                     </span>
                   </div>
                 </div>
@@ -839,31 +889,31 @@ export const SourceConnectorView = ({
       )}
 
       {/* 3. CONNECTION PARAMETERS FORM */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4 transition-colors">
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-4 transition-colors">
+        <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
           <div>
-            <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              {activeSource.toUpperCase()} Connection Credentials & Ingestion Parameters
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
+              {activeSource.toUpperCase()} Connection & Extraction
             </h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-              Enter details to connect directly to your live data source or cloud storage.
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Enter credentials to connect to your live data source or storage.
             </p>
           </div>
 
           <button
             type="button"
             onClick={handleSaveCurrentConnection}
-            className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
-            title="Save these connection credentials for 1-click re-use"
+            className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center space-x-1.5 transition-colors"
+            title="Save connection for re-use"
           >
-            <Save className="w-3.5 h-3.5 text-sky-500" />
-            <span>Save Connection</span>
+            <Save className="w-3.5 h-3.5 text-zinc-500" />
+            <span>Save</span>
           </button>
         </div>
 
         {/* Connection Name Field */}
         <div>
-          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
             Connection Name (Label) *
           </label>
           <input
@@ -871,7 +921,7 @@ export const SourceConnectorView = ({
             placeholder="e.g. Production Analytics DB"
             value={connectionName}
             onChange={(e) => setConnectionName(e.target.value)}
-            className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-sky-500 font-sans"
+            className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-sans"
           />
         </div>
 
@@ -880,71 +930,71 @@ export const SourceConnectorView = ({
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Host / Server IP *</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Host / Server IP *</label>
                 <input
                   type="text"
                   placeholder="localhost or db.company.com"
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-sky-500 font-mono"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Port *</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
                 <input
                   type="number"
                   placeholder="3306"
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-sky-500 font-mono"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Database Name *</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
                 <input
                   type="text"
                   placeholder="e.g. sales_db"
                   value={dbName}
                   onChange={(e) => setDbName(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-sky-500 font-mono"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Username</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
                 <input
                   type="text"
                   placeholder="Username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-sky-500 font-mono"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
                 <input
                   type="password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-sky-500 font-mono"
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                 />
               </div>
             </div>
 
             {/* Table Selector (Checkboxes) or Custom SQL Switch */}
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-3">
               <div className="flex items-center space-x-4">
                 <button
                   type="button"
                   onClick={() => setIsCustomSql(false)}
-                  className={`text-xs font-semibold flex items-center space-x-1.5 pb-1 border-b-2 transition-all ${
-                    !isCustomSql ? 'border-slate-900 text-slate-900 dark:border-sky-500 dark:text-white' : 'border-transparent text-slate-400 hover:text-slate-600'
+                  className={`text-xs font-medium flex items-center space-x-1.5 pb-1 border-b-2 transition-colors ${
+                    !isCustomSql ? 'border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
                   }`}
                 >
                   <TableIcon className="w-3.5 h-3.5" />
@@ -954,8 +1004,8 @@ export const SourceConnectorView = ({
                 <button
                   type="button"
                   onClick={() => setIsCustomSql(true)}
-                  className={`text-xs font-semibold flex items-center space-x-1.5 pb-1 border-b-2 transition-all ${
-                    isCustomSql ? 'border-slate-900 text-slate-900 dark:border-sky-500 dark:text-white' : 'border-transparent text-slate-400 hover:text-slate-600'
+                  className={`text-xs font-medium flex items-center space-x-1.5 pb-1 border-b-2 transition-colors ${
+                    isCustomSql ? 'border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
                   }`}
                 >
                   <Code2 className="w-3.5 h-3.5" />
@@ -968,48 +1018,50 @@ export const SourceConnectorView = ({
                   {tablesList.length > 0 ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
                           Available Database Tables ({tablesList.length})
                         </label>
 
                         <div className="relative">
-                          <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <Search className="w-3 h-3 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
                             placeholder="Filter tables..."
                             value={tableSearchTerm}
                             onChange={(e) => setTableSearchTerm(e.target.value)}
-                            className="pl-7 pr-2.5 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-sky-500 w-44 font-mono"
+                            className="pl-7 pr-2.5 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-44 font-mono"
                           />
                         </div>
                       </div>
 
                       {/* Interactive Checkbox List of Tables */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto p-1 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto p-1 bg-zinc-50/50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800">
                         {filteredTables.map((tbl) => {
                           const isSelected = selectedTable === tbl;
                           return (
                             <div
                               key={tbl}
                               onClick={() => setSelectedTable(tbl)}
-                              className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between select-none ${
+                              className={`p-2.5 rounded-md border cursor-pointer transition-colors flex items-center justify-between select-none ${
                                 isSelected
-                                  ? 'bg-sky-50 border-sky-500 text-sky-950 dark:bg-sky-500/20 dark:text-sky-200 dark:border-sky-500 shadow-sm ring-1 ring-sky-500'
-                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-300'
+                                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs'
+                                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-700 dark:text-zinc-300'
                               }`}
                             >
-                              <div className="flex items-center space-x-2.5 min-w-0">
+                              <div className="flex items-center space-x-2 min-w-0">
                                 {isSelected ? (
-                                  <CheckSquare className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                                  <CheckSquare className="w-4 h-4 text-white dark:text-zinc-900 shrink-0" />
                                 ) : (
-                                  <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                                  <Square className="w-4 h-4 text-zinc-400 shrink-0" />
                                 )}
-                                <span className="font-mono text-xs font-semibold truncate">
+                                <span className="font-mono text-xs font-medium truncate">
                                   {tbl}
                                 </span>
                               </div>
 
-                              <span className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 shrink-0">
+                              <span className={`text-[9px] font-mono uppercase px-1 py-0.2 rounded shrink-0 ${
+                                isSelected ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                              }`}>
                                 TABLE
                               </span>
                             </div>
@@ -1018,20 +1070,20 @@ export const SourceConnectorView = ({
                       </div>
 
                       {selectedTable && (
-                        <p className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold flex items-center space-x-1 pt-0.5">
+                        <p className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-medium flex items-center space-x-1 pt-0.5">
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Selected Table for Extraction: <strong>{selectedTable}</strong></span>
+                          <span>Selected Table: <strong>{selectedTable}</strong></span>
                         </p>
                       )}
                     </div>
                   ) : (
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Target Table Name
                         </label>
-                        <span className="text-[10px] text-slate-400">
-                          (Click "Test & Fetch Tables" below to introspect database tables)
+                        <span className="text-[11px] text-zinc-400">
+                          (Click "Test & Fetch Tables" below)
                         </span>
                       </div>
                       <input
@@ -1039,20 +1091,20 @@ export const SourceConnectorView = ({
                         placeholder="e.g. orders, users, transactions"
                         value={selectedTable}
                         onChange={(e) => setSelectedTable(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
+                        className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
                       />
                     </div>
                   )}
                 </div>
               ) : (
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Custom SQL Query</label>
+                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Custom SQL Query</label>
                   <textarea
                     rows={3}
                     placeholder="SELECT id, amount, created_at FROM orders WHERE status = 'COMPLETED'"
                     value={customSql}
                     onChange={(e) => setCustomSql(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white font-mono focus:outline-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                   />
                 </div>
               )}
@@ -1064,46 +1116,46 @@ export const SourceConnectorView = ({
         {activeSource === 's3' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">S3 Bucket Name *</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">S3 Bucket Name *</label>
               <input
                 type="text"
                 placeholder="my-production-lakehouse-bucket"
                 value={s3Bucket}
                 onChange={(e) => setS3Bucket(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
+                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Key Prefix / File Path *</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Key Prefix / File Path *</label>
               <input
                 type="text"
                 placeholder="data/raw/sales.parquet"
                 value={s3Key}
                 onChange={(e) => setS3Key(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
+                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">AWS Access Key ID</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">AWS Access Key ID</label>
               <input
                 type="text"
                 placeholder="AKIAIOSFODNN7EXAMPLE"
                 value={s3AccessKey}
                 onChange={(e) => setS3AccessKey(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
+                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">AWS Secret Access Key</label>
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">AWS Secret Access Key</label>
               <input
                 type="password"
                 placeholder="••••••••••••••••"
                 value={s3SecretKey}
                 onChange={(e) => setS3SecretKey(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
+                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
               />
             </div>
           </div>
@@ -1111,71 +1163,261 @@ export const SourceConnectorView = ({
 
         {/* Azure ADLS Lakehouse Config */}
         {activeSource === 'azure' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Storage Account Name *</label>
-              <input
-                type="text"
-                placeholder="datalakeprod"
-                value={azureAccount}
-                onChange={(e) => setAzureAccount(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
-              />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Storage Account Name *</label>
+                <input
+                  type="text"
+                  placeholder=""
+                  value={azureAccount}
+                  onChange={(e) => setAzureAccount(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Container Name *</label>
+                <input
+                  type="text"
+                  placeholder=""
+                  value={azureContainer}
+                  onChange={(e) => setAzureContainer(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Account Key / SAS Token</label>
+                <input
+                  type="password"
+                  placeholder="Key, SAS token, or Conn String"
+                  value={azureKey}
+                  onChange={(e) => setAzureKey(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Container Name *</label>
-              <input
-                type="text"
-                placeholder="bronze-lake"
-                value={azureContainer}
-                onChange={(e) => setAzureContainer(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
-              />
+            {/* Interactive Browse Action Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 p-3 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center space-x-2">
+                <FolderOpen className="w-4 h-4 text-zinc-700 dark:text-zinc-300 shrink-0" />
+                <span className="text-xs text-zinc-700 dark:text-zinc-300 font-medium">
+                  {azureExplorerOpen ? 'Container File Explorer Active' : 'Live Azure Storage Container Explorer'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleBrowseAzure('')}
+                disabled={azureBrowsing}
+                className="px-3 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-50 shadow-xs"
+              >
+                {azureBrowsing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Connecting to Azure...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-3.5 h-3.5" />
+                    <span>{azureExplorerOpen ? 'Refresh Explorer' : 'Test & Fetch Live Files'}</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            <div className="sm:col-span-2">
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">Blob Path *</label>
-              <input
-                type="text"
-                placeholder="telemetry/iot.parquet"
-                value={azurePath}
-                onChange={(e) => setAzurePath(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
-              />
-            </div>
+            {/* Visual Azure Lakehouse File Explorer */}
+            {azureExplorerOpen && (
+              <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 bg-zinc-50/50 dark:bg-zinc-950/50 space-y-3.5 animate-fadeIn">
+                {/* Breadcrumbs Navigation & Search */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+                  <div className="flex items-center flex-wrap gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleBrowseAzure('')}
+                      className={`px-2 py-1 rounded font-mono font-medium transition-colors ${
+                        !azurePrefix 
+                          ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' 
+                          : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      root ({azureContainer || 'container'})
+                    </button>
+
+                    {azurePrefix.split('/').filter(Boolean).map((part, idx, arr) => {
+                      const partialPath = arr.slice(0, idx + 1).join('/') + '/';
+                      const isLast = idx === arr.length - 1;
+                      return (
+                        <React.Fragment key={partialPath}>
+                          <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <button
+                            type="button"
+                            onClick={() => handleBrowseAzure(partialPath)}
+                            className={`px-2 py-1 rounded font-mono font-medium transition-colors ${
+                              isLast 
+                                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' 
+                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            {part}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+
+                  <div className="relative w-full sm:w-48">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="Filter files..."
+                      value={azureSearchTerm}
+                      onChange={(e) => setAzureSearchTerm(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    />
+                  </div>
+                </div>
+
+                {/* Sub-Folders List */}
+                {azureFolders.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                      Folders ({azureFolders.filter(f => !azureSearchTerm || f.name.toLowerCase().includes(azureSearchTerm.toLowerCase())).length})
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                      {azureFolders
+                        .filter(f => !azureSearchTerm || f.name.toLowerCase().includes(azureSearchTerm.toLowerCase()))
+                        .map((folder) => (
+                          <div
+                            key={folder.path}
+                            onClick={() => handleBrowseAzure(folder.path)}
+                            className="p-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-600 cursor-pointer transition-colors flex items-center justify-between group"
+                          >
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <Folder className="w-4 h-4 text-zinc-600 dark:text-zinc-400 shrink-0 group-hover:text-zinc-900 dark:group-hover:text-zinc-100" />
+                              <span className="font-mono text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                                {folder.name}
+                              </span>
+                            </div>
+                            <ChevronRight className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-200 shrink-0" />
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Files List */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                    Files ({azureFiles.filter(f => !azureSearchTerm || f.name.toLowerCase().includes(azureSearchTerm.toLowerCase())).length})
+                  </p>
+                  
+                  {azureFiles.filter(f => !azureSearchTerm || f.name.toLowerCase().includes(azureSearchTerm.toLowerCase())).length === 0 ? (
+                    <p className="text-xs text-zinc-400 italic py-2">No files found in this directory path.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                      {azureFiles
+                        .filter(f => !azureSearchTerm || f.name.toLowerCase().includes(azureSearchTerm.toLowerCase()))
+                        .map((file) => {
+                          const isSelected = azurePath === file.path;
+                          const sizeKb = file.size_bytes ? (file.size_bytes / 1024).toFixed(1) + ' KB' : '—';
+                          return (
+                            <div
+                              key={file.path}
+                              onClick={() => handleSelectAzureFile(file)}
+                              className={`p-2.5 rounded-md border cursor-pointer transition-colors flex items-center justify-between ${
+                                isSelected
+                                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs'
+                                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-700 dark:text-zinc-300'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2.5 min-w-0">
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-white dark:text-zinc-900 shrink-0" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-zinc-400 shrink-0" />
+                                )}
+                                <FileText className="w-4 h-4 shrink-0 opacity-70" />
+                                <span className="font-mono text-xs font-medium truncate">
+                                  {file.name}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-2 shrink-0">
+                                <span className="text-[10px] font-mono opacity-60">
+                                  {sizeKb}
+                                </span>
+                                <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-semibold ${
+                                  isSelected 
+                                    ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900' 
+                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                                }`}>
+                                  {file.format || 'PARQUET'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Selected File Confirmation Badge */}
+            {azurePath ? (
+              <div className="p-3 rounded-md bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex items-center justify-between text-xs font-mono text-emerald-700 dark:text-emerald-300">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="truncate">
+                    Selected Source: <strong>abfss://{azureContainer || 'container'}@{azureAccount || 'account'}.dfs.core.windows.net/{azurePath}</strong>
+                  </span>
+                </div>
+                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 shrink-0 ml-2">
+                  {azureFormat}
+                </span>
+              </div>
+            ) : (
+              azureExplorerOpen && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">
+                  Click on any file in the explorer above to select it as the pipeline source.
+                </p>
+              )
+            )}
           </div>
         )}
 
         {/* File Upload Config */}
         {activeSource === 'upload' && (
-          <div className="p-6 border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-xl text-center space-y-3 bg-slate-50 dark:bg-slate-950">
-            <Upload className="w-8 h-8 text-slate-400 mx-auto" />
+          <div className="p-6 border border-dashed border-zinc-300 dark:border-zinc-800 rounded-lg text-center space-y-3 bg-zinc-50 dark:bg-zinc-950">
+            <Upload className="w-8 h-8 text-zinc-400 mx-auto" />
             <div>
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
                 Upload CSV, Parquet, or JSON dataset
               </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Directly stages and profiles raw user data files into the Lakehouse.
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Directly stages and profiles raw data files into the Lakehouse.
               </p>
             </div>
             <input
               type="file"
               accept=".csv,.parquet,.json,.txt"
               onChange={handleFileUpload}
-              className="text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-900 file:text-white dark:file:bg-sky-500 cursor-pointer"
+              className="text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-zinc-900 file:text-white dark:file:bg-zinc-100 dark:file:text-zinc-900 cursor-pointer"
             />
             {uploadedFileInfo && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-mono font-semibold">
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-mono font-medium">
                 ✓ Ready: {uploadedFileInfo.filename} ({(uploadedFileInfo.size_bytes / 1024).toFixed(1)} KB)
               </p>
             )}
           </div>
         )}
 
-        {/* Success / Test / Error Messages */}
+        {/* Messages */}
         {saveSuccessMsg && (
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center space-x-2">
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40 rounded-md text-emerald-800 dark:text-emerald-300 text-xs font-medium flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{saveSuccessMsg}</span>
           </div>
@@ -1183,16 +1425,16 @@ export const SourceConnectorView = ({
 
         {testStatus && (
           <div
-            className={`p-3 rounded-lg border flex items-start space-x-2 text-xs font-mono ${
+            className={`p-3 rounded-md border flex items-start space-x-2 text-xs font-mono ${
               testStatus.success
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20'
-                : 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/40'
             }`}
           >
             {testStatus.success ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+              <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
             )}
             <div>
               <p className="font-semibold">{testStatus.success ? 'Connection Successful' : 'Connection Failed'}</p>
@@ -1202,19 +1444,19 @@ export const SourceConnectorView = ({
         )}
 
         {error && (
-          <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg text-rose-700 dark:text-rose-400 text-xs flex items-center space-x-2">
+          <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 rounded-md text-red-700 dark:text-red-400 text-xs flex items-center space-x-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {/* Action Buttons: Test Connection & Proceed to Schema Cast */}
-        <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-slate-200 dark:border-slate-800">
+        <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-zinc-200 dark:border-zinc-800">
           <button
             type="button"
             onClick={handleTestConnection}
             disabled={testing}
-            className="w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
+            className="w-full sm:w-auto justify-center px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center space-x-1.5 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
             <span>{testing ? 'Testing...' : 'Test & Fetch Tables'}</span>
@@ -1224,9 +1466,9 @@ export const SourceConnectorView = ({
             type="button"
             onClick={handleInspect}
             disabled={inspecting}
-            className="w-full sm:w-auto justify-center px-4 py-2 sm:py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-sky-500 dark:hover:bg-sky-400 text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all disabled:opacity-50"
+            className="w-full sm:w-auto justify-center px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
           >
-            <span>{inspecting ? 'Profiling Schema...' : 'Inspect & Proceed to Schema'}</span>
+            <span>{inspecting ? 'Profiling Schema...' : 'Inspect & Cast Schema'}</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

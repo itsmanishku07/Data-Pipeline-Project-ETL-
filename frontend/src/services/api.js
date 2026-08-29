@@ -125,6 +125,11 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  browseAzureContainer: async (payload) => {
+    const res = await api.post('/sources/azure/browse', payload);
+    return res.data;
+  },
+
   inspectSource: async (req, limit = 100) => {
     const res = await api.post(`/sources/inspect?limit=${limit}`, req);
     return res.data;
@@ -298,4 +303,35 @@ export const DataFlowAPI = {
     invalidateDataFlowCache();
     return res.data;
   },
+};
+
+/**
+ * Safely parse any API error (FastAPI 422 list, object, string, or network exception)
+ * into a safe, human-readable string to guarantee React never throws 'Objects are not valid as React child'.
+ */
+export const extractErrorMessage = (err, fallback = 'An unexpected error occurred') => {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  
+  const detail = err.response?.data?.detail;
+  if (typeof detail === 'string') {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        if (typeof d === 'string') return d;
+        const loc = Array.isArray(d.loc) ? d.loc.filter((l) => l !== 'body').join('.') : '';
+        const msg = d.msg || d.message || JSON.stringify(d);
+        return loc ? `${loc}: ${msg}` : msg;
+      })
+      .join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  if (err.message && typeof err.message === 'string') {
+    return err.message;
+  }
+  return fallback;
 };
