@@ -103,6 +103,15 @@ export const DataFlowAPI = {
     });
   },
 
+  listSavedConnections: async (sourceType = null) => {
+    const cacheKey = `conn_${sourceType || 'all'}`;
+    return cachedGet(cacheKey, async () => {
+      const url = sourceType ? `/sources/connections?source_type=${sourceType}` : '/sources/connections';
+      const res = await api.get(url);
+      return res.data;
+    });
+  },
+
   saveConnection: async (connDict) => {
     const res = await api.post('/sources/connections', connDict);
     invalidateDataFlowCache('conn');
@@ -301,6 +310,53 @@ export const DataFlowAPI = {
   updateMetadataCredentials: async (creds) => {
     const res = await api.post('/history/credentials', creds);
     invalidateDataFlowCache();
+    return res.data;
+  },
+
+  // Cron Schedules & Automated Triggers
+  listSchedules: async (flowId = null) => {
+    const url = flowId && flowId !== 'all' ? `/schedules?flow_id=${encodeURIComponent(flowId)}` : '/schedules';
+    const res = await api.get(url);
+    return res.data;
+  },
+
+  getSchedule: async (scheduleId) => {
+    const res = await api.get(`/schedules/${scheduleId}`);
+    return res.data;
+  },
+
+  previewCron: async (cron) => {
+    const res = await api.get(`/schedules/preview-cron?cron=${encodeURIComponent(cron)}`);
+    return res.data;
+  },
+
+  createSchedule: async (payload) => {
+    const res = await api.post('/schedules', payload);
+    invalidateDataFlowCache('sched');
+    return res.data;
+  },
+
+  updateSchedule: async (scheduleId, payload) => {
+    const res = await api.put(`/schedules/${scheduleId}`, payload);
+    invalidateDataFlowCache('sched');
+    return res.data;
+  },
+
+  toggleSchedule: async (scheduleId) => {
+    const res = await api.post(`/schedules/${scheduleId}/toggle`);
+    invalidateDataFlowCache('sched');
+    return res.data;
+  },
+
+  runScheduleNow: async (scheduleId) => {
+    const res = await api.post(`/schedules/${scheduleId}/run-now`);
+    invalidateDataFlowCache('jobs');
+    return res.data;
+  },
+
+  deleteSchedule: async (scheduleId) => {
+    const res = await api.delete(`/schedules/${scheduleId}`);
+    invalidateDataFlowCache('sched');
     return res.data;
   },
 };

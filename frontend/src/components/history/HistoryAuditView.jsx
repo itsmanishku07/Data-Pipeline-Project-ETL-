@@ -17,6 +17,7 @@ import {
   Save
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 
 export const HistoryAuditView = () => {
   const [activeTab, setActiveTab] = useState('audit'); // 'audit', 'ingestion', 'transform', 'credentials', 'schema'
@@ -92,16 +93,26 @@ export const HistoryAuditView = () => {
     }
   };
 
-  const handleClearAllHistory = async () => {
-    if (!window.confirm('Are you sure you want to clear all metadata, staged datasets, jobs, and audit logs? This will reset the workspace to a completely blank slate.')) {
-      return;
-    }
+  // Clear History Confirmation Modal State
+  const [clearConfirmModal, setClearConfirmModal] = useState({
+    isOpen: false,
+    loading: false
+  });
+
+  const promptClearAllHistory = () => {
+    setClearConfirmModal({ isOpen: true, loading: false });
+  };
+
+  const confirmClearAllHistory = async () => {
+    setClearConfirmModal((prev) => ({ ...prev, loading: true }));
     setLoading(true);
     try {
       await DataFlowAPI.clearAllHistory();
+      setClearConfirmModal({ isOpen: false, loading: false });
       fetchAllData();
     } catch (err) {
       console.error('Failed to clear history', err);
+      setClearConfirmModal({ isOpen: false, loading: false });
     } finally {
       setLoading(false);
     }
@@ -137,7 +148,7 @@ export const HistoryAuditView = () => {
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             <button
               type="button"
-              onClick={handleClearAllHistory}
+              onClick={promptClearAllHistory}
               disabled={loading}
               className="flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900/40 bg-red-50/50 hover:bg-red-100/50 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-xs font-medium text-red-700 dark:text-red-400 flex items-center space-x-1.5 transition-colors"
               title="Clear all staged datasets, jobs, and audit logs"
@@ -570,6 +581,18 @@ export const HistoryAuditView = () => {
           </div>
         </div>
       )}
+      {/* Clear All History Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={clearConfirmModal.isOpen}
+        title="Reset & Clear All Workspace History?"
+        message="Are you sure you want to clear all metadata, staged lakehouse datasets, pipeline runs, and audit logs? This action is irreversible and resets your workspace to a clean slate."
+        confirmText="Reset Workspace"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={clearConfirmModal.loading}
+        onConfirm={confirmClearAllHistory}
+        onCancel={() => setClearConfirmModal({ isOpen: false, loading: false })}
+      />
     </div>
   );
 };

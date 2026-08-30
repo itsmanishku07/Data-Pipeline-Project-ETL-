@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
 import { DataGrid } from '../common/DataGrid';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 
 export const StagingAreaView = ({
   initialDatasetId,
@@ -40,6 +41,43 @@ export const StagingAreaView = ({
   const [searchStage, setSearchStage] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  // Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState({
+    isOpen: false,
+    stageId: null,
+    stageName: '',
+    loading: false
+  });
+
+  const promptDeleteStage = (stageId, stageName, e) => {
+    if (e) e.stopPropagation();
+    setDeleteConfirmModal({
+      isOpen: true,
+      stageId,
+      stageName,
+      loading: false
+    });
+  };
+
+  const confirmDeleteStage = async () => {
+    const { stageId } = deleteConfirmModal;
+    if (!stageId) return;
+    setDeleteConfirmModal((prev) => ({ ...prev, loading: true }));
+    try {
+      await DataFlowAPI.deleteStagedDataset(stageId);
+      const updated = datasets.filter((d) => d.id !== stageId);
+      setDatasets(updated);
+      if (activeDataset?.id === stageId) {
+        setActiveDataset(null);
+        setPreviewData(null);
+      }
+      setDeleteConfirmModal({ isOpen: false, stageId: null, stageName: '', loading: false });
+    } catch (err) {
+      console.error('Delete stage error', err);
+      setDeleteConfirmModal({ isOpen: false, stageId: null, stageName: '', loading: false });
+    }
+  };
 
   const loadStagedDatasets = async () => {
     setLoading(true);
@@ -99,22 +137,6 @@ export const StagingAreaView = ({
       setPreviewData(data);
     } catch (err) {
       console.error('Failed to load preview page', err);
-    }
-  };
-
-  const handleDeleteStage = async (stageId, e) => {
-    if (e) e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this staged dataset?')) return;
-    try {
-      await DataFlowAPI.deleteStagedDataset(stageId);
-      const updated = datasets.filter((d) => d.id !== stageId);
-      setDatasets(updated);
-      if (activeDataset?.id === stageId) {
-        setActiveDataset(null);
-        setPreviewData(null);
-      }
-    } catch (err) {
-      console.error('Delete stage error', err);
     }
   };
 
@@ -287,7 +309,7 @@ export const StagingAreaView = ({
                         </span>
                         <button
                           type="button"
-                          onClick={(e) => handleDeleteStage(ds.id, e)}
+                          onClick={(e) => promptDeleteStage(ds.id, ds.name, e)}
                           className="text-zinc-400 hover:text-red-600 p-0.5 transition-colors"
                           title="Delete staged dataset"
                         >
@@ -327,6 +349,19 @@ export const StagingAreaView = ({
             })}
           </div>
         )}
+
+        {/* Delete Stage Confirmation Modal */}
+        <ConfirmationModal
+          isOpen={deleteConfirmModal.isOpen}
+          title={`Delete Staged Dataset "${deleteConfirmModal.stageName}"?`}
+          message="Are you sure you want to delete this staged dataset? The underlying MySQL table data and parquet partitions will be permanently removed."
+          confirmText="Delete Dataset"
+          cancelText="Cancel"
+          variant="danger"
+          isLoading={deleteConfirmModal.loading}
+          onConfirm={confirmDeleteStage}
+          onCancel={() => setDeleteConfirmModal({ isOpen: false, stageId: null, stageName: '', loading: false })}
+        />
       </div>
     );
   }
@@ -365,7 +400,7 @@ export const StagingAreaView = ({
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
           <button
             type="button"
-            onClick={(e) => handleDeleteStage(activeDataset.id, e)}
+            onClick={(e) => promptDeleteStage(activeDataset.id, activeDataset.name, e)}
             className="flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900/40 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/60 text-xs font-medium text-red-700 dark:text-red-400 flex items-center space-x-1 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -524,6 +559,19 @@ export const StagingAreaView = ({
           </div>
         </div>
       )}
+
+      {/* Delete Stage Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={deleteConfirmModal.isOpen}
+        title={`Delete Staged Dataset "${deleteConfirmModal.stageName}"?`}
+        message="Are you sure you want to delete this staged dataset? The underlying MySQL table data and parquet partitions will be permanently removed."
+        confirmText="Delete Dataset"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={deleteConfirmModal.loading}
+        onConfirm={confirmDeleteStage}
+        onCancel={() => setDeleteConfirmModal({ isOpen: false, stageId: null, stageName: '', loading: false })}
+      />
     </div>
   );
 };

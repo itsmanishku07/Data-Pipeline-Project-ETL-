@@ -23,35 +23,35 @@ class AzureLakehouseConnector(BaseConnector):
         if not account_name:
             raise ValueError("Azure Storage Account Name is required.")
 
-        # 1. Direct Connection String
-        if self.config.connection_string and self.config.connection_string.strip():
-            return BlobServiceClient.from_connection_string(self.config.connection_string.strip())
+        raw_conn = (self.config.connection_string or "").strip()
+        raw_key = (self.config.account_key or "").strip()
+        raw_sas = (self.config.sas_token or "").strip()
 
-        # 2. SAS Token
-        if self.config.sas_token and self.config.sas_token.strip():
-            sas = self.config.sas_token.strip()
-            if sas.startswith("?"):
-                account_url = f"https://{account_name}.blob.core.windows.net{sas}"
-                return BlobServiceClient(account_url=account_url)
+        # 1. Connection String Check
+        if raw_conn:
+            if "DefaultEndpointsProtocol=" in raw_conn or "AccountName=" in raw_conn:
+                return BlobServiceClient.from_connection_string(raw_conn)
+            elif raw_conn.startswith("?") or "sig=" in raw_conn or "sv=" in raw_conn:
+                sas = raw_conn if raw_conn.startswith("?") else f"?{raw_conn}"
+                return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net{sas}")
             else:
-                account_url = f"https://{account_name}.blob.core.windows.net"
-                return BlobServiceClient(account_url=account_url, credential=sas)
+                # Raw account key provided in connection string field
+                return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net", credential=raw_conn)
 
-        # 3. Account Key (or SAS Token entered into key field)
-        if self.config.account_key and self.config.account_key.strip():
-            key = self.config.account_key.strip()
-            if key.startswith("DefaultEndpointsProtocol="):
-                return BlobServiceClient.from_connection_string(key)
-            elif key.startswith("?") or "sig=" in key or "sv=" in key or "sp=" in key:
-                if key.startswith("?"):
-                    account_url = f"https://{account_name}.blob.core.windows.net{key}"
-                    return BlobServiceClient(account_url=account_url)
-                else:
-                    account_url = f"https://{account_name}.blob.core.windows.net"
-                    return BlobServiceClient(account_url=account_url, credential=key)
+        # 2. SAS Token Check
+        if raw_sas:
+            sas = raw_sas if raw_sas.startswith("?") else f"?{raw_sas}"
+            return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net{sas}")
+
+        # 3. Account Key Check
+        if raw_key:
+            if raw_key.startswith("DefaultEndpointsProtocol=") or "AccountName=" in raw_key:
+                return BlobServiceClient.from_connection_string(raw_key)
+            elif raw_key.startswith("?") or "sig=" in raw_key or "sv=" in raw_key:
+                sas = raw_key if raw_key.startswith("?") else f"?{raw_key}"
+                return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net{sas}")
             else:
-                account_url = f"https://{account_name}.blob.core.windows.net"
-                return BlobServiceClient(account_url=account_url, credential=key)
+                return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net", credential=raw_key)
 
         # 4. Anonymous / Public Container Access
         account_url = f"https://{account_name}.blob.core.windows.net"
@@ -121,7 +121,7 @@ class AzureLakehouseConnector(BaseConnector):
                 else:
                     blob_path = item.name
                     file_name = blob_path[len(clean_prefix):]
-                    ext = file_name.split(".")[-1].lower() if "." in file_name else "parquet"
+                    ext = file_name.split(".")[-1].lower() if "." in file_name else "auto"
                     last_mod = item.last_modified.isoformat() if hasattr(item, "last_modified") and item.last_modified else None
                     files.append({
                         "name": file_name,
@@ -142,7 +142,8 @@ class AzureLakehouseConnector(BaseConnector):
 
     def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
         """
-        Downloads and parses the actual data file from Azure Blob / ADLS Gen2.
+        Downloads and parses the actual data file from Azure Blob / ADLS Gen2
+        with automatic magic-bytes format detection and graceful multi-format fallback.
         """
         client = self._get_blob_service_client()
         container_name = (self.config.container_name or "").strip()
@@ -162,34 +163,137 @@ class AzureLakehouseConnector(BaseConnector):
 
         fmt = self.config.file_format
         p = blob_path.lower()
+        pref = str(fmt.value if hasattr(fmt, "value") else (fmt or "")).lower()
+
+        # 1. Quick Magic bytes check for Parquet
+        is_parquet_magic = content.startswith(b"PAR1") or (len(content) >= 4 and content[-4:] == b"PAR1")
+        if is_parquet_magic:
+            try:
+                df = pd.read_parquet(io.BytesIO(content))
+                return df.head(limit) if limit and len(df) > limit else df
+            except Exception:
+                pass
+
+        # 2. Try preferred format first
+        if pref in ["parquet", "delta"] or p.endswith(".parquet"):
+            try:
+                df = pd.read_parquet(io.BytesIO(content))
+                return df.head(limit) if limit and len(df) > limit else df
+            except Exception:
+                pass
+
+        if pref == "json" or p.endswith(".json"):
+            try:
+                df = pd.read_json(io.BytesIO(content))
+                return df.head(limit) if limit and len(df) > limit else df
+            except Exception:
+                try:
+                    df = pd.read_json(io.BytesIO(content), lines=True)
+                    return df.head(limit) if limit and len(df) > limit else df
+                except Exception:
+                    pass
+
+        if pref == "csv" or p.endswith(".csv") or p.endswith(".tsv") or p.endswith(".txt"):
+            for sep in [",", None, "\t", ";", "|"]:
+                try:
+                    df = pd.read_csv(io.BytesIO(content), sep=sep, nrows=limit)
+                    if len(df.columns) > 0 and len(df) >= 0:
+                        return df
+                except Exception:
+                    pass
+
+        # 3. Universal Fallback Cascade across all common formats
+        # A. CSV / TSV / Delimited Text (with auto delimiter & encoding detection)
+        for enc in ["utf-8", "latin1", "cp1252", "utf-16"]:
+            for sep in [",", None, "\t", ";", "|"]:
+                try:
+                    df = pd.read_csv(io.BytesIO(content), sep=sep, encoding=enc, nrows=limit, on_bad_lines="skip")
+                    if len(df.columns) > 0 and len(df) >= 0:
+                        return df
+                except Exception:
+                    pass
+
+        # B. JSON / Line-delimited JSON
+        try:
+            df = pd.read_json(io.BytesIO(content))
+            return df.head(limit) if limit and len(df) > limit else df
+        except Exception:
+            pass
+        try:
+            df = pd.read_json(io.BytesIO(content), lines=True)
+            return df.head(limit) if limit and len(df) > limit else df
+        except Exception:
+            pass
+
+        # C. Parquet
+        try:
+            df = pd.read_parquet(io.BytesIO(content))
+            return df.head(limit) if limit and len(df) > limit else df
+        except Exception:
+            pass
+
+        # D. Excel
+        try:
+            df = pd.read_excel(io.BytesIO(content))
+            return df.head(limit) if limit and len(df) > limit else df
+        except Exception:
+            pass
+
+        raise RuntimeError(f"Could not parse the format of Azure file '{blob_path}'. Please ensure it is a valid CSV, Parquet, JSON, or TSV tabular file.")
+
+    def upload_data(self, df: pd.DataFrame, target_path: Optional[str] = None, file_format: str = "parquet", overwrite: bool = True) -> Dict[str, Any]:
+        """
+        Uploads a Pandas DataFrame directly to Azure Blob / ADLS Gen2 container as CSV, Parquet, or JSON.
+        """
+        client = self._get_blob_service_client()
+        container_name = (self.config.container_name or "").strip()
+        blob_path = (target_path or self.config.path or "").strip().lstrip("/")
+
+        if not container_name:
+            raise ValueError("Azure Container Name is required for export.")
+        if not blob_path:
+            raise ValueError("Azure destination blob Path is required for export.")
+
+        # Serialize dataframe to in-memory byte buffer
+        buffer = io.BytesIO()
+        ext = blob_path.split(".")[-1].lower() if "." in blob_path else file_format.lower()
+
+        if ext == "csv":
+            df.to_csv(buffer, index=False)
+            content_type = "text/csv"
+        elif ext == "json":
+            df.to_json(buffer, orient="records", indent=2)
+            content_type = "application/json"
+        else: # default to parquet
+            df.to_parquet(buffer, index=False)
+            content_type = "application/octet-stream"
+
+        buffer.seek(0)
+        data_bytes = buffer.getvalue()
 
         try:
-            if fmt == FileFormat.PARQUET or p.endswith(".parquet"):
-                df = pd.read_parquet(io.BytesIO(content))
-            elif fmt == FileFormat.JSON or p.endswith(".json"):
-                try:
-                    df = pd.read_json(io.BytesIO(content))
-                except Exception:
-                    df = pd.read_json(io.BytesIO(content), lines=True)
-            elif fmt == FileFormat.DELTA:
-                try:
-                    df = pd.read_parquet(io.BytesIO(content))
-                except Exception:
-                    import deltalake
-                    dt = deltalake.DeltaTable(f"abfss://{container_name}@{self.config.account_name}.dfs.core.windows.net/{blob_path}")
-                    df = dt.to_pandas()
-            else: # CSV, TSV, TXT
-                delimiter = "\t" if p.endswith(".tsv") else ","
-                try:
-                    df = pd.read_csv(io.BytesIO(content), delimiter=delimiter, nrows=limit)
-                except Exception:
-                    df = pd.read_csv(io.BytesIO(content), nrows=limit)
+            container_client = client.get_container_client(container_name)
+            # Create container if it does not exist
+            try:
+                if not container_client.exists():
+                    container_client.create_container()
+            except Exception:
+                pass
 
-            if limit and len(df) > limit:
-                df = df.head(limit)
-            return df
+            blob_client = client.get_blob_client(container=container_name, blob=blob_path)
+            blob_client.upload_blob(data_bytes, overwrite=overwrite)
+
+            return {
+                "success": True,
+                "blob_path": blob_path,
+                "container": container_name,
+                "account": self.config.account_name,
+                "size_bytes": len(data_bytes),
+                "rows_uploaded": len(df),
+                "url": f"https://{self.config.account_name}.blob.core.windows.net/{container_name}/{blob_path}"
+            }
         except Exception as e:
-            raise RuntimeError(f"Error parsing downloaded Azure file '{blob_path}': {str(e)}")
+            raise RuntimeError(self._format_azure_error(e, self.config.account_name, container_name))
 
     def get_source_summary(self) -> str:
         return f"Azure Lakehouse: abfss://{self.config.container_name}@{self.config.account_name}.dfs.core.windows.net/{self.config.path}"

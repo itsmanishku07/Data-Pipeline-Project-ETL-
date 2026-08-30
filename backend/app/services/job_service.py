@@ -134,13 +134,125 @@ class JobService:
 
         elif dest_type == DestinationTypeEnum.S3 and dest_req.s3_dest:
             cfg = dest_req.s3_dest
-            return {"success": True, "message": f"AWS S3 destination target 's3://{cfg.bucket}/{cfg.key_prefix}' configured (Format: {cfg.file_format.upper()})."}
+            b_name = cfg.get_bucket()
+            k_name = cfg.get_key()
+            return {"success": True, "message": f"AWS S3 destination target 's3://{b_name}/{k_name}' configured (Format: {cfg.file_format.upper()})."}
 
-        elif dest_type == DestinationTypeEnum.AZURE and dest_req.azure_dest:
+        elif dest_type in (DestinationTypeEnum.AZURE, DestinationTypeEnum.AZURE_LAKEHOUSE) and dest_req.azure_dest:
             cfg = dest_req.azure_dest
-            return {"success": True, "message": f"Azure ADLS destination target 'adls://{cfg.account_name}/{cfg.container_name}/{cfg.path}' configured."}
+            try:
+                from ..connectors.azure_connector import AzureLakehouseConnector
+                from ..models.schemas import AzureLakehouseConfig, FileFormat
+
+                ext = cfg.path.split(".")[-1].lower() if "." in cfg.path else cfg.file_format.lower()
+                fmt = FileFormat.CSV if ext == "csv" else (FileFormat.JSON if ext == "json" else FileFormat.PARQUET)
+
+                az_cfg = AzureLakehouseConfig(
+                    account_name=cfg.account_name,
+                    container_name=cfg.container_name,
+                    account_key=cfg.account_key,
+                    sas_token=getattr(cfg, "sas_token", None),
+                    connection_string=getattr(cfg, "connection_string", None),
+                    path=cfg.path,
+                    file_format=fmt
+                )
+                conn = AzureLakehouseConnector(az_cfg)
+                ok, msg = conn.test_connection()
+                if ok:
+                    return {"success": True, "message": f"Successfully validated Azure Lakehouse target 'adls://{cfg.account_name}/{cfg.container_name}/{cfg.path}'"}
+                else:
+                    return {"success": False, "message": msg}
+            except Exception as e:
+                return {"success": False, "message": f"Azure test failed: {str(e)}"}
 
         return {"success": True, "message": "Destination configuration accepted."}
+
+    @staticmethod
+    def _export_to_azure(df: pd.DataFrame, cfg: AzureDestinationConfig, logs: List[str]):
+        logs.append(f"[DESTINATION] Connecting to Azure Storage account '{cfg.account_name}', container '{cfg.container_name}'...")
+        try:
+            from ..connectors.azure_connector import AzureLakehouseConnector
+            from ..models.schemas import AzureLakehouseConfig, FileFormat
+
+            ext = cfg.path.split(".")[-1].lower() if "." in cfg.path else cfg.file_format.lower()
+            if ext == "csv":
+                fmt = FileFormat.CSV
+            elif ext == "json":
+                fmt = FileFormat.JSON
+            else:
+                fmt = FileFormat.PARQUET
+
+            account_name = (cfg.account_name or "").strip()
+            container_name = (cfg.container_name or "").strip()
+            target_path = (cfg.path or "").strip()
+
+            az_cfg = AzureLakehouseConfig(
+                account_name=account_name,
+                container_name=container_name,
+                account_key=cfg.account_key,
+                sas_token=getattr(cfg, "sas_token", None),
+                connection_string=getattr(cfg, "connection_string", None),
+                path=target_path,
+                file_format=fmt
+            )
+            connector = AzureLakehouseConnector(az_cfg)
+            res = connector.upload_data(df, target_path=target_path, file_format=ext, overwrite=True)
+
+            logs.append(f"[DESTINATION SUCCESS] Successfully loaded {res['rows_uploaded']} rows ({res['size_bytes']:,} bytes) into Azure Lakehouse at '{res['blob_path']}'.")
+            logs.append(f"[DESTINATION URI] {res['url']}")
+        except Exception as e:
+            err_msg = f"Azure export failed: {str(e)}"
+            logs.append(f"[DESTINATION ERROR] {err_msg}")
+            raise RuntimeError(err_msg)
+
+    @staticmethod
+    def _export_to_s3(df: pd.DataFrame, cfg: S3DestinationConfig, logs: List[str]):
+        logs.append(f"[DESTINATION] Exporting {len(df)} rows to AWS S3 's3://{cfg.bucket}/{cfg.key_prefix}' (Format: {cfg.file_format})...")
+        try:
+            import boto3
+            import io
+            from ..models.schemas import S3SourceConfig, FileFormat
+
+            ext = cfg.key_prefix.split(".")[-1].lower() if "." in cfg.key_prefix else cfg.file_format.lower()
+            s3_client_kwargs = {}
+            if cfg.region:
+                s3_client_kwargs["region_name"] = cfg.region
+            if cfg.access_key and cfg.secret_key:
+                s3_client_kwargs["aws_access_key_id"] = cfg.access_key
+                s3_client_kwargs["aws_secret_access_key"] = cfg.secret_key
+
+            s3_client = boto3.client("s3", **s3_client_kwargs)
+            buf = io.BytesIO()
+            if ext == "csv":
+                df.to_csv(buf, index=False)
+                c_type = "text/csv"
+            elif ext == "json":
+                df.to_json(buf, orient="records", indent=2)
+                c_type = "application/json"
+            else:
+                df.to_parquet(buf, index=False)
+                c_type = "application/octet-stream"
+
+            buf.seek(0)
+            data_bytes = buf.getvalue()
+            s3_client.put_object(
+                Bucket=cfg.bucket,
+                Key=cfg.key_prefix,
+                Body=data_bytes,
+                ContentType=c_type
+            )
+            logs.append(f"[DESTINATION SUCCESS] Successfully exported {len(df)} rows to S3 target 's3://{cfg.bucket}/{cfg.key_prefix}'.")
+        except Exception as e:
+            # Fallback to local export file if boto3 credentials are simulated
+            import tempfile
+            temp_out = Path(tempfile.gettempdir()) / "dataflow_outputs"
+            temp_out.mkdir(parents=True, exist_ok=True)
+            s3_mock_file = temp_out / f"s3_{cfg.bucket}_{uuid.uuid4().hex[:6]}.{cfg.file_format}"
+            if cfg.file_format == "csv":
+                df.to_csv(s3_mock_file, index=False)
+            else:
+                df.to_parquet(s3_mock_file, index=False)
+            logs.append(f"[DESTINATION NOTICE] {str(e)}. Staged export locally at {s3_mock_file.name}.")
 
     @staticmethod
     def _export_to_database(df: pd.DataFrame, cfg: DatabaseDestinationConfig, logs: List[str]):
@@ -290,22 +402,9 @@ class JobService:
                 if dest.destination_type == DestinationTypeEnum.DATABASE and dest.database_dest:
                     JobService._export_to_database(df_out, dest.database_dest, logs)
                 elif dest.destination_type == DestinationTypeEnum.S3 and dest.s3_dest:
-                    cfg = dest.s3_dest
-                    logs.append(f"[DESTINATION] Exporting {len(df_out)} rows to AWS S3 's3://{cfg.bucket}/{cfg.key_prefix}' (Format: {cfg.file_format})...")
-                    # Local fallback export if direct boto3 is unconfigured
-                    import tempfile
-                    temp_out = Path(tempfile.gettempdir()) / "dataflow_outputs"
-                    temp_out.mkdir(parents=True, exist_ok=True)
-                    s3_mock_file = temp_out / f"s3_{cfg.bucket}_{uuid.uuid4().hex[:6]}.{cfg.file_format}"
-                    if cfg.file_format == "csv":
-                        df_out.to_csv(s3_mock_file, index=False)
-                    else:
-                        df_out.to_parquet(s3_mock_file, index=False)
-                    logs.append(f"[DESTINATION SUCCESS] Successfully exported to S3 target 's3://{cfg.bucket}/{cfg.key_prefix}'.")
-                elif dest.destination_type == DestinationTypeEnum.AZURE and dest.azure_dest:
-                    cfg = dest.azure_dest
-                    logs.append(f"[DESTINATION] Exporting {len(df_out)} rows to Azure Lakehouse 'adls://{cfg.account_name}/{cfg.container_name}/{cfg.path}'...")
-                    logs.append(f"[DESTINATION SUCCESS] Successfully loaded dataset into Azure Lakehouse.")
+                    JobService._export_to_s3(df_out, dest.s3_dest, logs)
+                elif dest.destination_type in (DestinationTypeEnum.AZURE, DestinationTypeEnum.AZURE_LAKEHOUSE) and dest.azure_dest:
+                    JobService._export_to_azure(df_out, dest.azure_dest, logs)
 
             # Record Ingestion & Transformation History
             CatalogDB.record_transformation(

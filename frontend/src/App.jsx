@@ -8,6 +8,7 @@ import { StagingAreaView } from './components/staging/StagingAreaView';
 import { TransformationStudioView } from './components/transform/TransformationStudioView';
 import { PipelineExecutionView } from './components/pipeline/PipelineExecutionView';
 import { HistoryAuditView } from './components/history/HistoryAuditView';
+import { ScheduledFlowsView } from './components/schedules/ScheduledFlowsView';
 import { DataFlowAPI } from './services/api';
 import { 
   GitBranch,
@@ -16,7 +17,8 @@ import {
   Layers, 
   Sliders, 
   PlayCircle, 
-  History 
+  History,
+  CalendarClock 
 } from 'lucide-react';
 
 const mobileNavItems = [
@@ -27,6 +29,7 @@ const mobileNavItems = [
   { id: 4, label: 'Transform', icon: Sliders },
   { id: 5, label: 'Pipeline', icon: PlayCircle },
   { id: 6, label: 'History', icon: History },
+  { id: 7, label: 'Cron', icon: CalendarClock },
 ];
 
 export const App = () => {
@@ -34,13 +37,13 @@ export const App = () => {
     try {
       const saved = localStorage.getItem('dataflow_current_step');
       const num = Number(saved);
-      return num >= 0 && num <= 6 ? num : 0;
+      return num >= 0 && num <= 7 ? num : 0;
     } catch {
       return 0;
     }
   });
 
-  const [maxStepReached, setMaxStepReached] = useState(6);
+  const [maxStepReached, setMaxStepReached] = useState(7);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Flows state with persistence
@@ -223,10 +226,49 @@ export const App = () => {
     }
   };
 
-  const goToStep = (step) => {
+  // Initialize baseline history state
+  useEffect(() => {
+    try {
+      if (!window.history.state || window.history.state.step === undefined) {
+        window.history.replaceState({ step: currentStep, type: 'app_step' }, '', window.location.pathname);
+      }
+    } catch {}
+  }, []);
+
+  const goToStep = (step, pushHistory = true) => {
+    if (step === currentStep) return;
     setCurrentStep(step);
     setMaxStepReached((prev) => Math.max(prev, step));
+    if (pushHistory) {
+      try {
+        window.history.pushState({ step, type: 'app_step' }, '', window.location.pathname);
+      } catch {}
+    }
   };
+
+  // Listen to mobile hardware/gesture & browser Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = (e) => {
+      // 1. If mobile menu drawer is open, close it first
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        return;
+      }
+
+      // 2. Handle step transition from history stack
+      const state = e.state;
+      if (state && typeof state.step === 'number') {
+        setCurrentStep(state.step);
+        setMaxStepReached((prev) => Math.max(prev, state.step));
+      } else {
+        // Fallback when history stack reaches base
+        setCurrentStep((prev) => (prev > 0 ? prev - 1 : 0));
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [mobileMenuOpen, currentStep]);
 
   // Sources -> Schema Handlers
   const handleSourceInspected = (req, result) => {
@@ -350,6 +392,7 @@ export const App = () => {
               allDatasets={allStagedDatasets}
               activeFlowId={activeFlowId}
               flows={flows}
+              initialDatasetId={activeStagedDataset?.id}
               onSelectFlow={handleFlowSelect}
               onProceedToExecution={handleProceedToExecution}
               onBackToStaging={() => goToStep(3)}
@@ -376,6 +419,15 @@ export const App = () => {
           {currentStep === 6 && (
             <HistoryAuditView />
           )}
+
+          {currentStep === 7 && (
+            <ScheduledFlowsView
+              flows={flows}
+              allDatasets={allStagedDatasets}
+              activeFlowId={activeFlowId}
+              onSelectFlow={handleFlowSelect}
+            />
+          )}
         </main>
       </div>
 
@@ -384,7 +436,7 @@ export const App = () => {
         {mobileNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentStep === item.id;
-          const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6;
+          const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6 || item.id === 7;
 
           return (
             <button

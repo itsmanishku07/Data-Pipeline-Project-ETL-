@@ -7,6 +7,7 @@ import {
   Sliders, 
   PlayCircle, 
   History, 
+  CalendarClock,
   Sun, 
   Moon, 
   X,
@@ -63,6 +64,13 @@ const navItems = [
     icon: History,
     badge: 'Store'
   },
+  { 
+    id: 7, 
+    label: 'Cron Scheduler', 
+    description: 'Automated Triggers & Target',
+    icon: CalendarClock,
+    badge: 'Cron'
+  },
 ];
 
 export const Sidebar = ({ 
@@ -105,7 +113,7 @@ export const Sidebar = ({
       >
         {/* Brand Header & Menu Wrapper */}
         <div className="w-72 md:w-60 flex flex-col h-full">
-          <div className="px-4 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="h-14 px-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
             <div 
               className="cursor-pointer flex items-center space-x-2"
               onClick={() => handleItemClick(0)}

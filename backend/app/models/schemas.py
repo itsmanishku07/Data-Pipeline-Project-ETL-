@@ -12,6 +12,7 @@ class SourceType(str, Enum):
     TRANSFORMED_PIPELINE = "transformed_pipeline"
 
 class FileFormat(str, Enum):
+    AUTO = "auto"
     CSV = "csv"
     PARQUET = "parquet"
     JSON = "json"
@@ -80,7 +81,7 @@ class AzureLakehouseConfig(BaseModel):
     account_key: Optional[str] = Field(None, description="Azure Account Key")
     sas_token: Optional[str] = Field(None, description="Shared Access Signature Token")
     connection_string: Optional[str] = Field(None, description="Azure Storage Connection String")
-    file_format: FileFormat = FileFormat.DELTA
+    file_format: FileFormat = FileFormat.AUTO
 
 class DatabaseSourceConfig(BaseModel):
     db_type: DatabaseType = DatabaseType.POSTGRES
@@ -216,6 +217,7 @@ class DestinationTypeEnum(str, Enum):
     DATABASE = "database"
     S3 = "s3"
     AZURE = "azure"
+    AZURE_LAKEHOUSE = "azure_lakehouse"
 
 class DatabaseDestinationConfig(BaseModel):
     db_type: str = "mysql"  # 'mysql', 'postgresql', 'sqlserver'
@@ -231,19 +233,29 @@ class DatabaseDestinationConfig(BaseModel):
     create_schema_if_not_exists: bool = True
 
 class S3DestinationConfig(BaseModel):
-    bucket: str
-    key_prefix: str
+    bucket: Optional[str] = None
+    bucket_name: Optional[str] = None
+    key_prefix: Optional[str] = None
+    key_path: Optional[str] = None
     region: str = "us-east-1"
     access_key: Optional[str] = None
     secret_key: Optional[str] = None
     file_format: str = "parquet"
 
+    def get_bucket(self) -> str:
+        return self.bucket or self.bucket_name or ""
+
+    def get_key(self) -> str:
+        return self.key_prefix or self.key_path or "exports/curated.parquet"
+
 class AzureDestinationConfig(BaseModel):
-    account_name: str
-    container_name: str
-    path: str
+    account_name: str = "adfstorage07"
+    container_name: str = "adf-container"
+    path: str = "csv_files/scheduled_output.csv"
     account_key: Optional[str] = None
-    file_format: str = "parquet"
+    sas_token: Optional[str] = None
+    connection_string: Optional[str] = None
+    file_format: str = "csv"
 
 class ExportDestinationRequest(BaseModel):
     destination_type: DestinationTypeEnum = DestinationTypeEnum.LAKEHOUSE
@@ -283,3 +295,65 @@ class JobStatus(BaseModel):
     output_file_path: Optional[str] = None
     logs: List[str] = []
     error: Optional[str] = None
+
+# Scheduled Flow & Cron Trigger Models
+class ScheduleFrequencyEnum(str, Enum):
+    MINUTES_5 = "*/5 * * * *"
+    MINUTES_15 = "*/15 * * * *"
+    MINUTES_30 = "*/30 * * * *"
+    HOURLY = "0 * * * *"
+    DAILY = "0 2 * * *"
+    WEEKLY = "0 0 * * 1"
+    MONTHLY = "0 0 1 * *"
+    CUSTOM = "custom"
+
+class FlowSchedule(BaseModel):
+    id: str
+    flow_id: str
+    flow_name: str
+    name: str
+    description: Optional[str] = ""
+    cron_expression: str
+    cron_human: str = ""
+    enabled: bool = True
+    staging_dataset_id: str
+    staging_dataset_name: Optional[str] = ""
+    destination_config: Optional[ExportDestinationRequest] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[str] = None
+    last_run_job_id: Optional[str] = None
+    last_run_message: Optional[str] = None
+    next_run_at: Optional[datetime] = None
+    run_count: int = 0
+
+class CreateScheduleRequest(BaseModel):
+    flow_id: str
+    name: str
+    description: Optional[str] = ""
+    cron_expression: str
+    cron_human: Optional[str] = ""
+    staging_dataset_id: str
+    destination_config: Optional[ExportDestinationRequest] = None
+    enabled: bool = True
+
+class UpdateScheduleRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    cron_expression: Optional[str] = None
+    cron_human: Optional[str] = None
+    staging_dataset_id: Optional[str] = None
+    destination_config: Optional[ExportDestinationRequest] = None
+    enabled: Optional[bool] = None
+
+class ScheduleRunSummary(BaseModel):
+    schedule_id: str
+    job_id: str
+    flow_id: str
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    message: str = ""
+    rows_processed: int = 0
+

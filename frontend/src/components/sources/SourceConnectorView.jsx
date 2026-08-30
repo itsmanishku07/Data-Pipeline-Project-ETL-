@@ -239,7 +239,7 @@ export const SourceConnectorView = ({
   const handleSelectAzureFile = (file) => {
     setAzurePath(file.path);
     const fmt = (file.format || '').toLowerCase();
-    if (['parquet', 'delta', 'csv', 'json'].includes(fmt)) {
+    if (['parquet', 'delta', 'csv', 'json', 'tsv'].includes(fmt)) {
       setAzureFormat(fmt);
     } else if (file.path.endsWith('.parquet')) {
       setAzureFormat('parquet');
@@ -247,6 +247,10 @@ export const SourceConnectorView = ({
       setAzureFormat('csv');
     } else if (file.path.endsWith('.json')) {
       setAzureFormat('json');
+    } else if (file.path.endsWith('.tsv')) {
+      setAzureFormat('csv');
+    } else {
+      setAzureFormat('auto');
     }
   };
 
@@ -1366,18 +1370,29 @@ export const SourceConnectorView = ({
               </div>
             )}
 
-            {/* Selected File Confirmation Badge */}
+            {/* Selected File Confirmation Badge & Format Selector */}
             {azurePath ? (
-              <div className="p-3 rounded-md bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex items-center justify-between text-xs font-mono text-emerald-700 dark:text-emerald-300">
-                <div className="flex items-center space-x-2 min-w-0">
+              <div className="p-3 rounded-md bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-mono text-emerald-700 dark:text-emerald-300">
+                <div className="flex items-center space-x-2 min-w-0 flex-1">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span className="truncate">
                     Selected Source: <strong>abfss://{azureContainer || 'container'}@{azureAccount || 'account'}.dfs.core.windows.net/{azurePath}</strong>
                   </span>
                 </div>
-                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 shrink-0 ml-2">
-                  {azureFormat}
-                </span>
+                <div className="flex items-center space-x-1.5 shrink-0 self-end sm:self-auto">
+                  <span className="text-[10px] text-emerald-800/70 dark:text-emerald-300/70 uppercase">Format:</span>
+                  <select
+                    value={azureFormat}
+                    onChange={(e) => setAzureFormat(e.target.value)}
+                    className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-white dark:bg-zinc-900 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 focus:outline-none"
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="csv">CSV / Delimited</option>
+                    <option value="parquet">Parquet</option>
+                    <option value="json">JSON</option>
+                    <option value="delta">Delta Lake</option>
+                  </select>
+                </div>
               </div>
             ) : (
               azureExplorerOpen && (

@@ -9,6 +9,7 @@ const sectionTitles = {
   4: { title: 'Transformation Rule Studio', subtitle: 'Chain PySpark filters, math formulas, string operations, and Spark SQL' },
   5: { title: 'Pipeline DAG Execution', subtitle: 'Compile and run the end-to-end transformation job and export golden files' },
   6: { title: 'MySQL Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
+  7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Azure Lakehouse, Database, or Cloud Storage' },
 };
 
 export const TopHeader = ({ 
@@ -24,7 +25,7 @@ export const TopHeader = ({
   const info = sectionTitles[currentStep] || sectionTitles[1];
 
   return (
-    <header className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-8 py-3 flex items-center justify-between gap-3 sticky top-0 z-30 transition-colors shrink-0">
+    <header className="h-14 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 sm:px-8 flex items-center justify-between gap-4 sticky top-0 z-30 transition-colors shrink-0">
       <div className="flex items-center space-x-3 min-w-0 flex-1">
         {/* Mobile Hamburger Button */}
         <button
@@ -37,27 +38,19 @@ export const TopHeader = ({
           <Menu className="w-4 h-4" />
         </button>
 
-        {/* Desktop Sidebar Toggle */}
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className={`hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border transition-colors shrink-0 text-xs ${
-            isSidebarHidden
-              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 font-medium'
-              : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
-          }`}
-          title={isSidebarHidden ? "Show Sidebar (Ctrl+B)" : "Hide Sidebar (Ctrl+B)"}
-          aria-label="Toggle Sidebar"
-        >
-          {isSidebarHidden ? (
-            <>
-              <PanelLeftOpen className="w-3.5 h-3.5" />
-              <span>Sidebar</span>
-            </>
-          ) : (
-            <PanelLeftClose className="w-3.5 h-3.5" />
-          )}
-        </button>
+        {/* Desktop Sidebar Toggle - Only visible when sidebar is collapsed */}
+        {isSidebarHidden && (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 transition-colors shrink-0 text-xs font-medium"
+            title="Show Sidebar (Ctrl+B)"
+            aria-label="Show Sidebar"
+          >
+            <PanelLeftOpen className="w-3.5 h-3.5" />
+            <span>Sidebar</span>
+          </button>
+        )}
 
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate tracking-tight">

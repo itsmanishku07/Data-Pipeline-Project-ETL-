@@ -17,9 +17,9 @@ def get_db_connection():
 
         try:
             connect_args = {
-                "connect_timeout": 10,
-                "read_timeout": 20,
-                "write_timeout": 20,
+                "connect_timeout": 3,
+                "read_timeout": 5,
+                "write_timeout": 5,
                 "charset": "utf8mb4"
             }
             host = (settings.MYSQL_HOST or "").lower()
@@ -173,6 +173,29 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stg_rec_ds ON staged_records(dataset_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stg_rec_flow ON staged_records(flow_id)")
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS flow_schedules (
+        id TEXT PRIMARY KEY,
+        flow_id TEXT NOT NULL,
+        flow_name TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        cron_expression TEXT NOT NULL,
+        cron_human TEXT,
+        enabled INTEGER DEFAULT 1,
+        staging_dataset_id TEXT NOT NULL,
+        destination_config_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        last_run_at TEXT,
+        last_run_status TEXT,
+        last_run_job_id TEXT,
+        last_run_message TEXT,
+        next_run_at TEXT,
+        run_count INTEGER DEFAULT 0
+    )
+    """)
+
     # Clean legacy dynamic SQLite tables
     try:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'stg_data_%'")
@@ -312,6 +335,31 @@ def init_db():
                     INDEX idx_conn_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
+                mconn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dataflow_flow_schedules (
+                    id VARCHAR(64) PRIMARY KEY,
+                    flow_id VARCHAR(64) NOT NULL,
+                    flow_name VARCHAR(255) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    cron_expression VARCHAR(128) NOT NULL,
+                    cron_human VARCHAR(255),
+                    enabled TINYINT(1) DEFAULT 1,
+                    staging_dataset_id VARCHAR(64) NOT NULL,
+                    destination_config_json JSON NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NULL,
+                    last_run_at DATETIME NULL,
+                    last_run_status VARCHAR(32) NULL,
+                    last_run_job_id VARCHAR(64) NULL,
+                    last_run_message TEXT NULL,
+                    next_run_at DATETIME NULL,
+                    run_count INT DEFAULT 0,
+                    INDEX idx_sched_flow (flow_id),
+                    INDEX idx_sched_enabled (enabled)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """))
+                mconn.commit()
 
                 # Clean legacy dynamic MySQL tables
                 try:
@@ -1428,7 +1476,308 @@ class CatalogDB:
             cursor.execute("DELETE FROM audit_logs")
             cursor.execute("DELETE FROM ingestion_history")
             cursor.execute("DELETE FROM transformation_history")
+            cursor.execute("DELETE FROM flow_schedules")
             conn.commit()
             conn.close()
         except Exception:
             pass
+
+    # =========================================================================
+    # FLOW SCHEDULES & CRON TRIGGERS CRUD
+    # =========================================================================
+    @staticmethod
+    def get_schedules(flow_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieves all scheduled flows, optionally filtered by flow_id."""
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    if flow_id:
+                        res = mconn.execute(
+                            text("SELECT * FROM dataflow_flow_schedules WHERE flow_id = :flow_id ORDER BY created_at DESC"),
+                            {"flow_id": flow_id}
+                        )
+                    else:
+                        res = mconn.execute(text("SELECT * FROM dataflow_flow_schedules ORDER BY created_at DESC"))
+                    
+                    rows = res.mappings().all()
+                    schedules = []
+                    for r in rows:
+                        d = dict(r)
+                        if isinstance(d.get("destination_config_json"), str):
+                            try:
+                                d["destination_config"] = json.loads(d["destination_config_json"])
+                            except Exception:
+                                d["destination_config"] = None
+                        else:
+                            d["destination_config"] = d.get("destination_config_json")
+                        d["enabled"] = bool(d.get("enabled", 1))
+                        schedules.append(d)
+                    return schedules
+            except Exception:
+                pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if flow_id:
+                cursor.execute("SELECT * FROM flow_schedules WHERE flow_id = ? ORDER BY created_at DESC", (flow_id,))
+            else:
+                cursor.execute("SELECT * FROM flow_schedules ORDER BY created_at DESC")
+            
+            rows = cursor.fetchall()
+            schedules = []
+            for r in rows:
+                d = dict(r)
+                dest_json = d.get("destination_config_json")
+                d["destination_config"] = json.loads(dest_json) if dest_json else None
+                d["enabled"] = bool(d.get("enabled", 1))
+                schedules.append(d)
+            conn.close()
+            return schedules
+        except Exception:
+            return []
+
+    @staticmethod
+    def get_schedule(schedule_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a single schedule by ID."""
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    res = mconn.execute(
+                        text("SELECT * FROM dataflow_flow_schedules WHERE id = :id LIMIT 1"),
+                        {"id": schedule_id}
+                    )
+                    row = res.mappings().first()
+                    if row:
+                        d = dict(row)
+                        if isinstance(d.get("destination_config_json"), str):
+                            try:
+                                d["destination_config"] = json.loads(d["destination_config_json"])
+                            except Exception:
+                                d["destination_config"] = None
+                        else:
+                            d["destination_config"] = d.get("destination_config_json")
+                        d["enabled"] = bool(d.get("enabled", 1))
+                        return d
+            except Exception:
+                pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM flow_schedules WHERE id = ? LIMIT 1", (schedule_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                d = dict(row)
+                dest_json = d.get("destination_config_json")
+                d["destination_config"] = json.loads(dest_json) if dest_json else None
+                d["enabled"] = bool(d.get("enabled", 1))
+                return d
+            return None
+        except Exception:
+            return None
+
+    @staticmethod
+    def save_schedule(schedule_data: Dict[str, Any]):
+        """Persists a new flow schedule in MySQL and SQLite."""
+        dest_cfg = schedule_data.get("destination_config")
+        dest_json = json.dumps(dest_cfg.dict() if hasattr(dest_cfg, "dict") else dest_cfg) if dest_cfg else None
+        
+        created_at = schedule_data.get("created_at") or datetime.utcnow()
+        created_at_dt = created_at if isinstance(created_at, datetime) else datetime.fromisoformat(str(created_at))
+        created_at_str = created_at_dt.isoformat()
+
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(
+                        text("""
+                        INSERT INTO dataflow_flow_schedules (
+                            id, flow_id, flow_name, name, description, cron_expression, cron_human,
+                            enabled, staging_dataset_id, destination_config_json, created_at, updated_at, next_run_at, run_count
+                        ) VALUES (
+                            :id, :flow_id, :flow_name, :name, :description, :cron_expression, :cron_human,
+                            :enabled, :staging_dataset_id, :dest_json, :created_at, :updated_at, :next_run_at, :run_count
+                        ) ON DUPLICATE KEY UPDATE
+                            name = VALUES(name),
+                            description = VALUES(description),
+                            cron_expression = VALUES(cron_expression),
+                            cron_human = VALUES(cron_human),
+                            enabled = VALUES(enabled),
+                            staging_dataset_id = VALUES(staging_dataset_id),
+                            destination_config_json = VALUES(destination_config_json),
+                            updated_at = VALUES(updated_at),
+                            next_run_at = VALUES(next_run_at)
+                        """),
+                        {
+                            "id": schedule_data["id"],
+                            "flow_id": schedule_data["flow_id"],
+                            "flow_name": schedule_data.get("flow_name", "Flow"),
+                            "name": schedule_data["name"],
+                            "description": schedule_data.get("description", ""),
+                            "cron_expression": schedule_data["cron_expression"],
+                            "cron_human": schedule_data.get("cron_human", ""),
+                            "enabled": 1 if schedule_data.get("enabled", True) else 0,
+                            "staging_dataset_id": schedule_data["staging_dataset_id"],
+                            "dest_json": dest_json,
+                            "created_at": created_at_dt,
+                            "updated_at": schedule_data.get("updated_at") or created_at_dt,
+                            "next_run_at": schedule_data.get("next_run_at"),
+                            "run_count": schedule_data.get("run_count", 0)
+                        }
+                    )
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO flow_schedules (
+                    id, flow_id, flow_name, name, description, cron_expression, cron_human,
+                    enabled, staging_dataset_id, destination_config_json, created_at, updated_at, next_run_at, run_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    cron_expression = excluded.cron_expression,
+                    cron_human = excluded.cron_human,
+                    enabled = excluded.enabled,
+                    staging_dataset_id = excluded.staging_dataset_id,
+                    destination_config_json = excluded.destination_config_json,
+                    updated_at = excluded.updated_at,
+                    next_run_at = excluded.next_run_at
+                """,
+                (
+                    schedule_data["id"],
+                    schedule_data["flow_id"],
+                    schedule_data.get("flow_name", "Flow"),
+                    schedule_data["name"],
+                    schedule_data.get("description", ""),
+                    schedule_data["cron_expression"],
+                    schedule_data.get("cron_human", ""),
+                    1 if schedule_data.get("enabled", True) else 0,
+                    schedule_data["staging_dataset_id"],
+                    dest_json,
+                    created_at_str,
+                    str(schedule_data.get("updated_at") or created_at_str),
+                    str(schedule_data.get("next_run_at")) if schedule_data.get("next_run_at") else None,
+                    schedule_data.get("run_count", 0)
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def update_schedule(schedule_id: str, updates: Dict[str, Any]):
+        """Updates specific fields of a schedule."""
+        sched = CatalogDB.get_schedule(schedule_id)
+        if not sched:
+            raise FileNotFoundError(f"Schedule '{schedule_id}' not found.")
+        
+        sched.update(updates)
+        sched["updated_at"] = datetime.utcnow()
+        CatalogDB.save_schedule(sched)
+
+    @staticmethod
+    def delete_schedule(schedule_id: str):
+        """Deletes a schedule by ID."""
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(
+                        text("DELETE FROM dataflow_flow_schedules WHERE id = :id"),
+                        {"id": schedule_id}
+                    )
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM flow_schedules WHERE id = ?", (schedule_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def record_schedule_run(schedule_id: str, job_id: str, status: str, message: str = "", next_run_at: Optional[datetime] = None):
+        """Updates execution status, job_id, run_count, and next run timestamp for a schedule."""
+        now = datetime.utcnow()
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(
+                        text("""
+                        UPDATE dataflow_flow_schedules SET
+                            last_run_at = :now,
+                            last_run_status = :status,
+                            last_run_job_id = :job_id,
+                            last_run_message = :message,
+                            next_run_at = :next_run_at,
+                            run_count = run_count + 1,
+                            updated_at = :now
+                        WHERE id = :id
+                        """),
+                        {
+                            "id": schedule_id,
+                            "now": now,
+                            "status": status,
+                            "job_id": job_id,
+                            "message": message,
+                            "next_run_at": next_run_at
+                        }
+                    )
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            settings.CATALOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE flow_schedules SET
+                    last_run_at = ?,
+                    last_run_status = ?,
+                    last_run_job_id = ?,
+                    last_run_message = ?,
+                    next_run_at = ?,
+                    run_count = run_count + 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    now.isoformat(),
+                    status,
+                    job_id,
+                    message,
+                    next_run_at.isoformat() if next_run_at else None,
+                    now.isoformat(),
+                    schedule_id
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+

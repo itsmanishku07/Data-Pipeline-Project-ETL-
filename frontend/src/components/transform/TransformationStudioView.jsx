@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sliders, 
   Plus, 
@@ -34,25 +34,162 @@ import {
   CheckSquare,
   Square,
   Columns,
-  Filter
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  MinusCircle,
+  ListOrdered,
+  Calculator,
+  Type,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 import { DataGrid } from '../common/DataGrid';
+import { ConfirmationModal } from '../common/ConfirmationModal';
+
+const OPERATION_CATEGORIES = [
+  {
+    category: 'Row Filtering',
+    items: [
+      {
+        id: 'filter',
+        label: 'Filter Rows',
+        subtitle: 'WHERE condition on column values',
+        icon: Filter,
+        badge: 'Filter'
+      }
+    ]
+  },
+  {
+    category: 'Column Projection & Schema',
+    items: [
+      {
+        id: 'select_columns',
+        label: 'Select Columns',
+        subtitle: 'Keep only specified columns',
+        icon: Columns,
+        badge: 'Project'
+      },
+      {
+        id: 'drop_columns',
+        label: 'Drop Columns',
+        subtitle: 'Remove unwanted columns',
+        icon: MinusCircle,
+        badge: 'Exclude'
+      },
+      {
+        id: 'rename_column',
+        label: 'Rename Column',
+        subtitle: 'Change column name in schema',
+        icon: Edit2,
+        badge: 'Rename'
+      }
+    ]
+  },
+  {
+    category: 'Analytics & Aggregations',
+    items: [
+      {
+        id: 'aggregate',
+        label: 'Group By & Aggregate',
+        subtitle: 'SUM, AVG, COUNT, MIN, MAX',
+        icon: BarChart2,
+        badge: 'Aggregate'
+      },
+      {
+        id: 'window_function',
+        label: 'Window Function & Ranking',
+        subtitle: 'ROW_NUMBER, RANK, LEAD, LAG',
+        icon: ListOrdered,
+        badge: 'Window'
+      }
+    ]
+  },
+  {
+    category: 'Calculations, Joins & SQL',
+    items: [
+      {
+        id: 'join',
+        label: 'Merge / Join Table',
+        subtitle: 'Multi-table relational joins',
+        icon: GitMerge,
+        badge: 'Join'
+      },
+      {
+        id: 'derived_column',
+        label: 'Derived Column',
+        subtitle: 'Math & column calculation formulas',
+        icon: Calculator,
+        badge: 'Formula'
+      },
+      {
+        id: 'string_transform',
+        label: 'String Cleansing',
+        subtitle: 'UPPERCASE, lowercase, Trim',
+        icon: Sparkles,
+        badge: 'Cleanse'
+      },
+      {
+        id: 'spark_sql',
+        label: 'Custom Spark SQL',
+        subtitle: 'Execute direct SQL expressions',
+        icon: Terminal,
+        badge: 'SQL'
+      }
+    ]
+  }
+];
 
 export const TransformationStudioView = ({
   allDatasets = [],
   activeFlowId = null,
   flows = [],
+  initialDatasetId = null,
   onSelectFlow = null,
   onProceedToExecution,
   onBackToStaging,
 }) => {
-  const [activeDataset, setActiveDataset] = useState(null);
+  const [activeDataset, setActiveDataset] = useState(() => {
+    try {
+      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
+      if (savedId && Array.isArray(allDatasets) && allDatasets.length > 0) {
+        return allDatasets.find((d) => d.id === savedId) || null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
   const [rules, setRules] = useState([]);
   const [previewResult, setPreviewResult] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [searchStage, setSearchStage] = useState('');
+
+  // Re-hydrate active dataset when datasets are loaded/updated from API
+  useEffect(() => {
+    if (activeDataset) return;
+    try {
+      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
+      if (savedId && Array.isArray(allDatasets) && allDatasets.length > 0) {
+        const match = allDatasets.find((d) => d.id === savedId);
+        if (match) {
+          setActiveDataset(match);
+        }
+      }
+    } catch {}
+  }, [allDatasets, initialDatasetId]);
+
+  // Persist active dataset ID to localStorage
+  useEffect(() => {
+    try {
+      if (activeDataset?.id) {
+        localStorage.setItem('dataflow_transform_active_stage_id', activeDataset.id);
+      }
+    } catch {}
+  }, [activeDataset]);
 
   // Rule Builder & Editor State
   const [ruleType, setRuleType] = useState('filter');
@@ -61,6 +198,29 @@ export const TransformationStudioView = ({
   const [colSearchTerm, setColSearchTerm] = useState('');
   const [statsSearchTerm, setStatsSearchTerm] = useState('');
   const [selectedStatsCols, setSelectedStatsCols] = useState([]);
+
+  // Preview Panel Visibility Toggle State
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false);
+
+  // Operation Dropdown Popover State
+  const [isOpDropdownOpen, setIsOpDropdownOpen] = useState(false);
+  const [opSearchTerm, setOpSearchTerm] = useState('');
+  const opDropdownRef = useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (opDropdownRef.current && !opDropdownRef.current.contains(e.target)) {
+        setIsOpDropdownOpen(false);
+      }
+    };
+    if (isOpDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpDropdownOpen]);
 
   // Persistence State
   const [savingRules, setSavingRules] = useState(false);
@@ -100,9 +260,31 @@ export const TransformationStudioView = ({
     }
   }, [activeDataset, activeFlowId, flows]);
 
+  // Handle browser / mobile back button inside Transformation Studio
+  useEffect(() => {
+    const handleStudioPopState = (e) => {
+      const state = e.state;
+      // If we are currently inside the stage Rule Builder and the back button was pressed
+      if (activeDataset && (!state || state.view !== 'stage_builder' || state.step !== 4)) {
+        setActiveDataset(null);
+        try {
+          localStorage.removeItem('dataflow_transform_active_stage_id');
+        } catch {}
+      }
+    };
+
+    window.addEventListener('popstate', handleStudioPopState);
+    return () => window.removeEventListener('popstate', handleStudioPopState);
+  }, [activeDataset]);
+
   const handleSelectStage = async (ds) => {
     setActiveDataset(ds);
+    try {
+      localStorage.setItem('dataflow_transform_active_stage_id', ds.id);
+      window.history.pushState({ step: 4, view: 'stage_builder', stageId: ds.id }, '', window.location.pathname);
+    } catch {}
     setPreviewResult(null);
+    setShowPreviewPanel(false);
     setErrorMsg(null);
     setEditingRuleId(null);
     setSaveSuccessMsg(null);
@@ -126,7 +308,11 @@ export const TransformationStudioView = ({
 
   const handleBackToStagesList = () => {
     setActiveDataset(null);
+    try {
+      localStorage.removeItem('dataflow_transform_active_stage_id');
+    } catch {}
     setPreviewResult(null);
+    setShowPreviewPanel(false);
     setErrorMsg(null);
     setEditingRuleId(null);
     setSaveSuccessMsg(null);
@@ -182,16 +368,142 @@ export const TransformationStudioView = ({
     }
   };
 
+  // Compute dynamic schema across the transformation DAG (including multi-table joins, derived & window columns)
+  const getAvailableColumns = (upToRuleId = null) => {
+    if (!activeDataset) return [];
+
+    let cols = [...(activeDataset.columns || [])];
+    const activeRules = rules.filter((r) => r.enabled);
+
+    for (const r of activeRules) {
+      if (upToRuleId && r.id === upToRuleId) break;
+
+      if (r.rule_type === 'join') {
+        const targetDs = allDatasets.find((d) => d.id === r.params?.target_dataset_id);
+        if (targetDs && targetDs.columns) {
+          const suffixRight = r.params?.suffix_right || '_joined';
+          const rightOn = r.params?.right_on;
+          const leftOn = r.params?.left_on;
+          const selectedCols = r.params?.selected_columns;
+          
+          let targetColsToInclude = targetDs.columns;
+          if (selectedCols && Array.isArray(selectedCols) && selectedCols.length > 0) {
+            targetColsToInclude = targetDs.columns.filter((c) => selectedCols.includes(c.name) || c.name === rightOn);
+          }
+
+          const existingNames = new Set(cols.map((c) => c.name));
+          const newCols = [];
+
+          for (const tc of targetColsToInclude) {
+            if (leftOn === rightOn && tc.name === rightOn) {
+              continue; // Shared join key column
+            }
+            if (existingNames.has(tc.name)) {
+              newCols.push({
+                name: `${tc.name}${suffixRight}`,
+                spark_type: tc.spark_type,
+                origin: targetDs.name
+              });
+            } else {
+              newCols.push({
+                name: tc.name,
+                spark_type: tc.spark_type,
+                origin: targetDs.name
+              });
+            }
+          }
+          cols = [...cols, ...newCols];
+        }
+      } else if (r.rule_type === 'derived_column') {
+        if (r.params?.column_name && !cols.some((c) => c.name === r.params.column_name)) {
+          cols.push({ name: r.params.column_name, spark_type: 'DoubleType', origin: 'Derived' });
+        }
+      } else if (r.rule_type === 'window_function') {
+        if (r.params?.target_column && !cols.some((c) => c.name === r.params.target_column)) {
+          cols.push({ name: r.params.target_column, spark_type: 'LongType', origin: 'Window' });
+        }
+      } else if (r.rule_type === 'rename_column') {
+        if (r.params?.old_name && r.params?.new_name) {
+          cols = cols.map((c) => c.name === r.params.old_name ? { ...c, name: r.params.new_name } : c);
+        }
+      } else if (r.rule_type === 'drop_columns') {
+        const dropSet = new Set(r.params?.columns || []);
+        cols = cols.filter((c) => !dropSet.has(c.name));
+      } else if (r.rule_type === 'select_columns') {
+        const keepSet = new Set(r.params?.columns || []);
+        if (keepSet.size > 0) {
+          cols = cols.filter((c) => keepSet.has(c.name));
+        }
+      } else if (r.rule_type === 'aggregate') {
+        const grp = r.params?.group_by || [];
+        const aggs = (r.params?.aggregations || []).map((a) => a.alias || `${a.op || 'sum'}_${a.column || 'metric'}`);
+        const newAggCols = [];
+        for (const g of grp) {
+          const found = cols.find((c) => c.name === g);
+          newAggCols.push(found || { name: g, spark_type: 'StringType' });
+        }
+        for (const a of aggs) {
+          newAggCols.push({ name: a, spark_type: 'DoubleType', origin: 'Aggregate' });
+        }
+        cols = newAggCols;
+      }
+    }
+
+    return cols;
+  };
+
+  const handleSelectOperation = (newType) => {
+    const availCols = getAvailableColumns(editingRuleId);
+    setRuleType(newType);
+    setIsOpDropdownOpen(false);
+    setOpSearchTerm('');
+    if (newType === 'select_columns') {
+      setParams({ columns: availCols.map((c) => c.name) });
+    } else if (newType === 'drop_columns') {
+      setParams({ columns: [] });
+    } else if (newType === 'aggregate') {
+      setParams({
+        group_by: [],
+        aggregations: [{
+          column: availCols[0]?.name || '',
+          op: 'sum',
+          alias: `sum_${availCols[0]?.name || 'metric'}`
+        }]
+      });
+    } else if (newType === 'window_function') {
+      setParams({
+        function_type: 'row_number',
+        target_column: 'row_num',
+        partition_by: [],
+        order_by: availCols[0]?.name || '',
+        order_direction: 'ASC',
+        value_column: availCols[0]?.name || '',
+        offset: 1
+      });
+    } else {
+      setParams({});
+    }
+  };
+
+  const getCurrentOpDef = () => {
+    for (const cat of OPERATION_CATEGORIES) {
+      const found = cat.items.find((item) => item.id === ruleType);
+      if (found) return found;
+    }
+    return OPERATION_CATEGORIES[0].items[0];
+  };
+
   const handleSaveOrUpdateRule = () => {
-    if (!activeDataset || !activeDataset.columns || activeDataset.columns.length === 0) return;
+    if (!activeDataset) return;
+    const currentCols = getAvailableColumns(editingRuleId);
     let p = { ...params };
 
     if (ruleType === 'select_columns') {
-      p.columns = p.columns && p.columns.length > 0 ? p.columns : (activeDataset.columns || []).map((c) => c.name);
+      p.columns = p.columns && p.columns.length > 0 ? p.columns : currentCols.map((c) => c.name);
     } else if (ruleType === 'drop_columns') {
-      p.columns = p.columns && p.columns.length > 0 ? p.columns : [activeDataset.columns?.[0]?.name].filter(Boolean);
+      p.columns = p.columns && p.columns.length > 0 ? p.columns : [currentCols[0]?.name].filter(Boolean);
     } else if (ruleType === 'filter') {
-      p.condition = p.condition || `${activeDataset.columns[0]?.name} IS NOT NULL`;
+      p.condition = p.condition || `${currentCols[0]?.name || 'id'} IS NOT NULL`;
     } else if (ruleType === 'join') {
       const available = allDatasets.filter((d) => d.id !== activeDataset.id);
       const targetDs = available.find((d) => d.id === p.target_dataset_id) || available[0];
@@ -200,8 +512,8 @@ export const TransformationStudioView = ({
         return;
       }
       p.target_dataset_id = targetDs.id;
-      p.left_on = p.left_on || activeDataset.columns[0]?.name;
-      p.right_on = p.right_on || targetDs.columns?.[0]?.name || activeDataset.columns[0]?.name;
+      p.left_on = p.left_on || currentCols[0]?.name || 'id';
+      p.right_on = p.right_on || targetDs.columns?.[0]?.name || currentCols[0]?.name;
       p.how = p.how || 'inner';
       p.suffix_right = p.suffix_right || `_${targetDs.name.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 10)}`;
     } else if (ruleType === 'derived_column') {
@@ -210,21 +522,21 @@ export const TransformationStudioView = ({
     } else if (ruleType === 'aggregate') {
       p.group_by = p.group_by || [];
       p.aggregations = p.aggregations && p.aggregations.length > 0 ? p.aggregations : [
-        { column: activeDataset.columns[0]?.name, op: 'sum', alias: `sum_${activeDataset.columns[0]?.name}` }
+        { column: currentCols[0]?.name || 'col', op: 'sum', alias: `sum_${currentCols[0]?.name || 'col'}` }
       ];
     } else if (ruleType === 'window_function') {
       p.function_type = p.function_type || 'row_number';
       p.target_column = p.target_column || (p.function_type === 'row_number' ? 'row_num' : `${p.function_type}_col`);
       p.partition_by = p.partition_by || [];
-      p.order_by = p.order_by || activeDataset.columns[0]?.name || '';
+      p.order_by = p.order_by || currentCols[0]?.name || '';
       p.order_direction = p.order_direction || 'ASC';
-      p.value_column = p.value_column || activeDataset.columns[0]?.name;
+      p.value_column = p.value_column || currentCols[0]?.name;
       p.offset = p.offset || 1;
     } else if (ruleType === 'string_transform') {
-      p.column = p.column || activeDataset.columns[0]?.name;
+      p.column = p.column || currentCols[0]?.name;
       p.operation = p.operation || 'upper';
     } else if (ruleType === 'rename_column') {
-      p.old_name = p.old_name || activeDataset.columns[0]?.name;
+      p.old_name = p.old_name || currentCols[0]?.name;
       p.new_name = p.new_name || `${p.old_name}_new`;
     } else if (ruleType === 'spark_sql') {
       p.query = p.query || 'SELECT * FROM df';
@@ -259,6 +571,7 @@ export const TransformationStudioView = ({
     setParams({});
     // Auto-save immediately to database
     autoSaveRules(updatedRules);
+    autoSaveRules(updatedRules);
   };
 
   const handleStartEdit = (rule) => {
@@ -279,13 +592,37 @@ export const TransformationStudioView = ({
     autoSaveRules(updated);
   };
 
-  const handleDelete = (idx) => {
+  // Delete Rule Confirmation Modal State
+  const [deleteRuleConfirmModal, setDeleteRuleConfirmModal] = useState({
+    isOpen: false,
+    ruleIdx: null,
+    ruleType: '',
+    ruleDescription: ''
+  });
+
+  const promptDeleteRule = (idx) => {
+    setDeleteRuleConfirmModal({
+      isOpen: true,
+      ruleIdx: idx,
+      ruleType: rules[idx]?.rule_type || 'Rule',
+      ruleDescription: rules[idx]?.description || ''
+    });
+  };
+
+  const confirmDeleteRule = () => {
+    const idx = deleteRuleConfirmModal.ruleIdx;
+    if (idx === null || idx === undefined) return;
     const updated = rules.filter((_, i) => i !== idx);
     setRules(updated);
     if (editingRuleId && rules[idx]?.id === editingRuleId) {
       handleCancelEdit();
     }
     autoSaveRules(updated);
+    setDeleteRuleConfirmModal({ isOpen: false, ruleIdx: null, ruleType: '', ruleDescription: '' });
+  };
+
+  const handleDelete = (idx) => {
+    promptDeleteRule(idx);
   };
 
   const handleMoveRule = (idx, direction) => {
@@ -323,6 +660,7 @@ export const TransformationStudioView = ({
     if (!activeDataset) return;
     setPreviewLoading(true);
     setErrorMsg(null);
+    setShowPreviewPanel(true);
     try {
       const activeOnly = rules.filter((r) => r.enabled);
       const res = await DataFlowAPI.previewTransform(activeDataset.id, activeOnly);
@@ -765,6 +1103,35 @@ export const TransformationStudioView = ({
             <span>{previewLoading ? 'Executing...' : 'Live Preview'}</span>
           </button>
 
+          {/* Toggle Preview Visibility (Hidden on mobile screens) */}
+          {showPreviewPanel ? (
+            <button
+              type="button"
+              onClick={() => setShowPreviewPanel(false)}
+              className="hidden sm:inline-flex justify-center px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium items-center space-x-1.5 transition-colors shrink-0"
+              title="Hide Preview Panel"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              <span>Hide Preview</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (!previewResult && rules.length > 0) {
+                  handlePreview();
+                } else {
+                  setShowPreviewPanel(true);
+                }
+              }}
+              className="hidden sm:inline-flex justify-center px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium items-center space-x-1.5 transition-colors shrink-0"
+              title="Show Preview Panel"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Show Preview</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleProceed}
@@ -792,12 +1159,14 @@ export const TransformationStudioView = ({
         </div>
       )}
 
-      {/* Main 2-Column Rule Studio */}
+      {/* Main Studio Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Column: Rule Builder & Sequence */}
-        <div className="lg:col-span-5 space-y-4">
+        {/* Left / Main Column: Rule Builder & Sequence */}
+        <div className={showPreviewPanel ? "lg:col-span-5 space-y-4" : "lg:col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-5"}>
           {/* Rule Builder / Editor Card */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs space-y-3 transition-colors">
+          <div className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs space-y-3 transition-colors ${
+            !showPreviewPanel ? 'lg:col-span-5' : ''
+          }`}>
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 uppercase tracking-wider">
                 {editingRuleId ? (
@@ -826,57 +1195,151 @@ export const TransformationStudioView = ({
             </div>
 
             <div className="grid grid-cols-1 gap-2.5">
-              <div>
-                <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Operation</label>
-                <select
-                  value={ruleType}
-                  onChange={(e) => {
-                    const newType = e.target.value;
-                    setRuleType(newType);
-                    if (newType === 'select_columns') {
-                      setParams({ columns: (activeDataset?.columns || []).map((c) => c.name) });
-                    } else if (newType === 'drop_columns') {
-                      setParams({ columns: [] });
-                    } else if (newType === 'aggregate') {
-                      setParams({
-                        group_by: [],
-                        aggregations: [{
-                          column: activeDataset?.columns?.[0]?.name || '',
-                          op: 'sum',
-                          alias: `sum_${activeDataset?.columns?.[0]?.name || 'metric'}`
-                        }]
-                      });
-                    } else if (newType === 'window_function') {
-                      setParams({
-                        function_type: 'row_number',
-                        target_column: 'row_num',
-                        partition_by: [],
-                        order_by: activeDataset?.columns?.[0]?.name || '',
-                        order_direction: 'ASC',
-                        value_column: activeDataset?.columns?.[0]?.name || '',
-                        offset: 1
-                      });
-                    } else {
-                      setParams({});
-                    }
-                  }}
-                  className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
-                >
-                  <option value="filter">Filter Rows (WHERE condition)</option>
-                  <option value="select_columns">Select Columns (Keep Selected Only)</option>
-                  <option value="drop_columns">Drop Columns (Exclude Selected)</option>
-                  <option value="aggregate">Group By & Aggregate (SUM/AVG/COUNT)</option>
-                  <option value="window_function">Window Function & Ranking (OVER PARTITION)</option>
-                  <option value="join">Merge / Join Table (Multi-Table Join)</option>
-                  <option value="derived_column">Derived Column (Math Formula)</option>
-                  <option value="string_transform">String Cleansing (Upper/Lower/Trim)</option>
-                  <option value="rename_column">Rename Column</option>
-                  <option value="spark_sql">Custom Spark SQL Query</option>
-                </select>
+              {/* Custom Operation Dropdown with Icons & Categories (No Emojis) */}
+              <div className="relative" ref={opDropdownRef}>
+                <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">
+                  Operation
+                </label>
+                
+                {/* Trigger Button */}
+                {(() => {
+                  const currentOp = getCurrentOpDef();
+                  const IconComp = currentOp.icon;
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setIsOpDropdownOpen(!isOpDropdownOpen)}
+                      className={`w-full px-3 py-2 bg-white dark:bg-zinc-950 border rounded-md text-xs transition-colors flex items-center justify-between shadow-xs ${
+                        isOpDropdownOpen
+                          ? 'border-zinc-900 dark:border-zinc-100 ring-1 ring-zinc-900 dark:ring-zinc-100'
+                          : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className="w-6 h-6 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 flex items-center justify-center shrink-0 border border-zinc-200 dark:border-zinc-700">
+                          <IconComp className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="text-left truncate">
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                            {currentOp.label}
+                          </div>
+                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
+                            {currentOp.subtitle}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                          {currentOp.badge}
+                        </span>
+                        {isOpDropdownOpen ? (
+                          <ChevronUp className="w-4 h-4 text-zinc-400" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-zinc-400" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })()}
+
+                {/* Dropdown Menu Popover */}
+                {isOpDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl overflow-hidden animate-fadeIn">
+                    {/* Quick Search */}
+                    <div className="p-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Search operations..."
+                          value={opSearchTerm}
+                          onChange={(e) => setOpSearchTerm(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full pl-8 pr-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Categorized Options List */}
+                    <div className="max-h-80 overflow-y-auto custom-scrollbar p-1.5 space-y-2">
+                      {OPERATION_CATEGORIES.map((category) => {
+                        const filteredItems = category.items.filter(
+                          (it) => !opSearchTerm.trim() || 
+                            it.label.toLowerCase().includes(opSearchTerm.toLowerCase()) ||
+                            it.subtitle.toLowerCase().includes(opSearchTerm.toLowerCase())
+                        );
+
+                        if (filteredItems.length === 0) return null;
+
+                        return (
+                          <div key={category.category} className="space-y-1">
+                            <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                              {category.category}
+                            </div>
+                            <div className="grid grid-cols-1 gap-1">
+                              {filteredItems.map((item) => {
+                                const isSelected = ruleType === item.id;
+                                const IconComponent = item.icon;
+
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => handleSelectOperation(item.id)}
+                                    className={`w-full p-2 rounded-md text-left transition-colors flex items-center justify-between group ${
+                                      isSelected
+                                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                                        : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center space-x-2.5 min-w-0">
+                                      <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 border ${
+                                        isSelected
+                                          ? 'bg-white/20 border-white/30 text-white dark:bg-zinc-900/20 dark:border-zinc-900/30 dark:text-zinc-900'
+                                          : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300'
+                                      }`}>
+                                        <IconComponent className="w-3.5 h-3.5" />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-semibold truncate">
+                                          {item.label}
+                                        </div>
+                                        <div className={`text-[10px] truncate ${
+                                          isSelected ? 'text-white/80 dark:text-zinc-900/80' : 'text-zinc-500 dark:text-zinc-400'
+                                        }`}>
+                                          {item.subtitle}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                                      <span className={`text-[9px] font-mono uppercase px-1.5 py-0.2 rounded font-medium ${
+                                        isSelected
+                                          ? 'bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900'
+                                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                                      }`}>
+                                        {item.badge}
+                                      </span>
+                                      {isSelected && (
+                                        <Check className="w-3.5 h-3.5 shrink-0" />
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {(ruleType === 'select_columns' || ruleType === 'drop_columns') && (() => {
-                const allCols = activeDataset?.columns || [];
+                const allCols = getAvailableColumns(editingRuleId);
                 const selectedCols = params.columns !== undefined
                   ? params.columns
                   : (ruleType === 'select_columns' ? allCols.map((c) => c.name) : []);
@@ -985,25 +1448,45 @@ export const TransformationStudioView = ({
                 );
               })()}
 
-              {ruleType === 'filter' && (
-                <div>
-                  <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">WHERE Condition</label>
-                  <input
-                    type="text"
-                    value={params.condition || ''}
-                    onChange={(e) => setParams({ ...params, condition: e.target.value })}
-                    placeholder="amount > 100 AND status = 'COMPLETED'"
-                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-              )}
+              {ruleType === 'filter' && (() => {
+                const availCols = getAvailableColumns(editingRuleId);
+                return (
+                  <div className="space-y-1.5">
+                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 font-medium">WHERE Condition</label>
+                    <input
+                      type="text"
+                      value={params.condition || ''}
+                      onChange={(e) => setParams({ ...params, condition: e.target.value })}
+                      placeholder="amount > 100 AND status = 'COMPLETED'"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    />
+                    <div className="flex items-center space-x-1 overflow-x-auto py-0.5 custom-scrollbar text-[10px] text-zinc-500">
+                      <span className="shrink-0 text-zinc-400">Insert Column:</span>
+                      {availCols.map((c) => (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => {
+                            const cond = params.condition ? `${params.condition} ${c.name}` : c.name;
+                            setParams({ ...params, condition: cond });
+                          }}
+                          className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-mono shrink-0 transition-colors"
+                          title={`Click to append ${c.name}`}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {ruleType === 'join' && (() => {
                 const available = allDatasets.filter((d) => d.id !== activeDataset.id);
                 const selectedTargetId = params.target_dataset_id || available[0]?.id;
                 const selectedTarget = available.find((d) => d.id === selectedTargetId) || available[0];
                 const targetCols = selectedTarget?.columns || [];
-                const currentCols = activeDataset.columns || [];
+                const currentCols = getAvailableColumns(editingRuleId);
                 const joinTypes = [
                   { id: 'inner', label: 'Inner' },
                   { id: 'left', label: 'Left' },
@@ -1088,7 +1571,9 @@ export const TransformationStudioView = ({
                           className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
                         >
                           {currentCols.map((c) => (
-                            <option key={c.name} value={c.name}>{c.name}</option>
+                            <option key={c.name} value={c.name}>
+                              {c.name} {c.origin ? `(${c.origin})` : ''}
+                            </option>
                           ))}
                         </select>
 
@@ -1107,7 +1592,7 @@ export const TransformationStudioView = ({
                     {/* Column Suffix */}
                     <div>
                       <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">
-                        Column Suffix
+                        Column Suffix (for duplicate column names)
                       </label>
                       <input
                         type="text"
@@ -1121,89 +1606,121 @@ export const TransformationStudioView = ({
                 );
               })()}
 
-              {ruleType === 'derived_column' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">New Column Name</label>
-                    <input
-                      type="text"
-                      value={params.column_name || ''}
-                      onChange={(e) => setParams({ ...params, column_name: e.target.value })}
-                      placeholder="total_revenue"
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Formula / Expression</label>
-                    <input
-                      type="text"
-                      value={params.expression || ''}
-                      onChange={(e) => setParams({ ...params, expression: e.target.value })}
-                      placeholder="unit_price * quantity"
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {ruleType === 'string_transform' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Column</label>
-                    <select
-                      value={params.column || activeDataset.columns[0]?.name}
-                      onChange={(e) => setParams({ ...params, column: e.target.value })}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
-                    >
-                      {activeDataset.columns.map((c) => (
-                        <option key={c.name} value={c.name}>{c.name}</option>
+              {ruleType === 'derived_column' && (() => {
+                const availCols = getAvailableColumns(editingRuleId);
+                return (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">New Column Name</label>
+                        <input
+                          type="text"
+                          value={params.column_name || ''}
+                          onChange={(e) => setParams({ ...params, column_name: e.target.value })}
+                          placeholder="total_revenue"
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Formula / Expression</label>
+                        <input
+                          type="text"
+                          value={params.expression || ''}
+                          onChange={(e) => setParams({ ...params, expression: e.target.value })}
+                          placeholder="unit_price * quantity"
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-1 overflow-x-auto py-0.5 custom-scrollbar text-[10px] text-zinc-500">
+                      <span className="shrink-0 text-zinc-400">Available Columns:</span>
+                      {availCols.map((c) => (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => {
+                            const expr = params.expression ? `${params.expression} ${c.name}` : c.name;
+                            setParams({ ...params, expression: expr });
+                          }}
+                          className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-mono shrink-0 transition-colors"
+                          title={`Click to insert ${c.name}`}
+                        >
+                          {c.name}
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Action</label>
-                    <select
-                      value={params.operation || 'upper'}
-                      onChange={(e) => setParams({ ...params, operation: e.target.value })}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100"
-                    >
-                      <option value="upper">UPPERCASE</option>
-                      <option value="lower">lowercase</option>
-                      <option value="trim">Trim</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
-              {ruleType === 'rename_column' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Old Column</label>
-                    <select
-                      value={params.old_name || activeDataset.columns[0]?.name}
-                      onChange={(e) => setParams({ ...params, old_name: e.target.value })}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
-                    >
-                      {activeDataset.columns.map((c) => (
-                        <option key={c.name} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
+              {ruleType === 'string_transform' && (() => {
+                const availCols = getAvailableColumns(editingRuleId);
+                return (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Column</label>
+                      <select
+                        value={params.column || availCols[0]?.name}
+                        onChange={(e) => setParams({ ...params, column: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
+                      >
+                        {availCols.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name} {c.origin ? `(${c.origin})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Action</label>
+                      <select
+                        value={params.operation || 'upper'}
+                        onChange={(e) => setParams({ ...params, operation: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100"
+                      >
+                        <option value="upper">UPPERCASE</option>
+                        <option value="lower">lowercase</option>
+                        <option value="trim">Trim</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">New Name</label>
-                    <input
-                      type="text"
-                      value={params.new_name || ''}
-                      onChange={(e) => setParams({ ...params, new_name: e.target.value })}
-                      placeholder="renamed_column"
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                    />
+                );
+              })()}
+
+              {ruleType === 'rename_column' && (() => {
+                const availCols = getAvailableColumns(editingRuleId);
+                return (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Old Column</label>
+                      <select
+                        value={params.old_name || availCols[0]?.name}
+                        onChange={(e) => setParams({ ...params, old_name: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono"
+                      >
+                        {availCols.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name} {c.origin ? `(${c.origin})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">New Name</label>
+                      <input
+                        type="text"
+                        value={params.new_name || ''}
+                        onChange={(e) => setParams({ ...params, new_name: e.target.value })}
+                        placeholder="renamed_column"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {ruleType === 'aggregate' && (() => {
-                const allCols = activeDataset?.columns || [];
+                const allCols = getAvailableColumns(editingRuleId);
                 const selectedGroupBy = params.group_by || [];
                 const aggregations = params.aggregations && params.aggregations.length > 0 
                   ? params.aggregations 
@@ -1362,7 +1879,7 @@ export const TransformationStudioView = ({
               })()}
 
               {ruleType === 'window_function' && (() => {
-                const allCols = activeDataset?.columns || [];
+                const allCols = getAvailableColumns(editingRuleId);
                 const selectedFunction = params.function_type || 'row_number';
                 const targetCol = params.target_column || (selectedFunction === 'row_number' ? 'row_num' : `${selectedFunction}_col`);
                 const valCol = params.value_column || allCols[0]?.name;
@@ -1585,7 +2102,9 @@ export const TransformationStudioView = ({
           </div>
 
           {/* Rules Pipeline Stack with Edit & Reorder controls */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs space-y-3 transition-colors">
+          <div className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs space-y-3 transition-colors ${
+            !showPreviewPanel ? 'lg:col-span-7' : ''
+          }`}>
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 uppercase tracking-wider">
                 <GitBranch className="w-3.5 h-3.5 text-zinc-500" />
@@ -1685,121 +2204,151 @@ export const TransformationStudioView = ({
                 ))}
               </div>
             )}
+
+            {/* Quick Action when Preview is Hidden */}
+            {!showPreviewPanel && rules.length > 0 && (
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-xs text-zinc-500">
+                <span className="font-mono text-[11px] text-zinc-400">Preview panel is hidden</span>
+                <button
+                  type="button"
+                  onClick={handlePreview}
+                  disabled={previewLoading}
+                  className="px-2.5 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-40"
+                >
+                  <Play className={`w-3 h-3 ${previewLoading ? 'animate-spin' : ''}`} />
+                  <span>{previewLoading ? 'Executing...' : 'Run & Show Preview'}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right Column: Live Data Preview & Code Inspector */}
-        <div className="lg:col-span-7 space-y-3">
-          {/* Top Inspector Tab Selector */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1.5 rounded-lg shadow-xs">
-            <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setActivePreviewTab('data')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
-                  activePreviewTab === 'data'
-                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <TableIcon className="w-3.5 h-3.5" />
-                <span>Data Table</span>
-                {previewResult && (
-                  <span className="text-[10px] font-mono opacity-80">
-                    ({previewResult.transformed_rows.toLocaleString()})
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActivePreviewTab('stats')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
-                  activePreviewTab === 'stats'
-                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <BarChart2 className="w-3.5 h-3.5" />
-                <span>Column Stats</span>
-                {previewResult && (
-                  <span className="text-[10px] font-mono opacity-80">
-                    ({previewResult.columns.length})
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActivePreviewTab('pyspark')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
-                  activePreviewTab === 'pyspark'
-                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>PySpark Code</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActivePreviewTab('sql')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
-                  activePreviewTab === 'sql'
-                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                <span>Spark SQL</span>
-              </button>
-
-              {previewResult && (
+        {showPreviewPanel && (
+          <div className="lg:col-span-7 space-y-3 animate-fadeIn">
+            {/* Top Inspector Tab Selector */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1.5 rounded-lg shadow-xs">
+              <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full sm:w-auto">
                 <button
                   type="button"
-                  onClick={() => setActivePreviewTab('plan')}
+                  onClick={() => setActivePreviewTab('data')}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
-                    activePreviewTab === 'plan'
+                    activePreviewTab === 'data'
                       ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
                       : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
                   }`}
                 >
-                  <Activity className="w-3.5 h-3.5" />
-                  <span>Execution Plan</span>
+                  <TableIcon className="w-3.5 h-3.5" />
+                  <span>Data Table</span>
+                  {previewResult && (
+                    <span className="text-[10px] font-mono opacity-80">
+                      ({previewResult.transformed_rows.toLocaleString()})
+                    </span>
+                  )}
                 </button>
-              )}
+
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewTab('stats')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
+                    activePreviewTab === 'stats'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                  }`}
+                >
+                  <BarChart2 className="w-3.5 h-3.5" />
+                  <span>Column Stats</span>
+                  {previewResult && (
+                    <span className="text-[10px] font-mono opacity-80">
+                      ({previewResult.columns.length})
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewTab('pyspark')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
+                    activePreviewTab === 'pyspark'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>PySpark Code</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewTab('sql')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
+                    activePreviewTab === 'sql'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>Spark SQL</span>
+                </button>
+
+                {previewResult && (
+                  <button
+                    type="button"
+                    onClick={() => setActivePreviewTab('plan')}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
+                      activePreviewTab === 'plan'
+                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    <span>Execution Plan</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons: Copy & Hide Preview */}
+              <div className="flex items-center space-x-1.5 self-end sm:self-auto shrink-0">
+                {(activePreviewTab === 'pyspark' || activePreviewTab === 'sql') && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(
+                      activePreviewTab === 'pyspark' ? getDynamicPySparkCode() : getDynamicSqlCode(),
+                      activePreviewTab
+                    )}
+                    className="p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center justify-center transition-colors shrink-0"
+                    title={copiedType === activePreviewTab ? "Copied!" : `Copy ${activePreviewTab === 'pyspark' ? 'PySpark' : 'SQL'} code`}
+                  >
+                    {copiedType === activePreviewTab ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
+
+                {/* Hide Preview Button (Hidden on mobile screens) */}
+                <button
+                  type="button"
+                  onClick={() => setShowPreviewPanel(false)}
+                  className="hidden sm:inline-flex items-center space-x-1 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white text-xs font-medium transition-colors shrink-0"
+                  title="Hide Preview Panel"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">Hide</span>
+                </button>
+              </div>
             </div>
 
-            {/* Copy Button for Code Tabs */}
-            {(activePreviewTab === 'pyspark' || activePreviewTab === 'sql') && (
-              <button
-                type="button"
-                onClick={() => handleCopy(
-                  activePreviewTab === 'pyspark' ? getDynamicPySparkCode() : getDynamicSqlCode(),
-                  activePreviewTab
-                )}
-                className="self-end sm:self-auto p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center justify-center transition-colors shrink-0"
-                title={copiedType === activePreviewTab ? "Copied!" : `Copy ${activePreviewTab === 'pyspark' ? 'PySpark' : 'SQL'} code`}
-              >
-                {copiedType === activePreviewTab ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-500" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* TAB 1: DATA TABLE */}
-          {activePreviewTab === 'data' && (
-            previewResult ? (
-              <div className="space-y-3 animate-fadeIn">
-                <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-3 gap-2 text-center sm:flex sm:items-center sm:justify-between text-xs font-mono text-zinc-700 dark:text-zinc-300">
-                  <div>
-                    <span className="text-[10px] text-zinc-400 block sm:inline sm:mr-1">Time:</span>
-                    <strong>{previewResult.execution_time_ms.toFixed(1)}ms</strong>
-                  </div>
+            {/* TAB 1: DATA TABLE */}
+            {activePreviewTab === 'data' && (
+              previewResult ? (
+                <div className="space-y-3 animate-fadeIn">
+                  <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-3 gap-2 text-center sm:flex sm:items-center sm:justify-between text-xs font-mono text-zinc-700 dark:text-zinc-300">
+                    <div>
+                      <span className="text-[10px] text-zinc-400 block sm:inline sm:mr-1">Time:</span>
+                      <strong>{previewResult.execution_time_ms.toFixed(1)}ms</strong>
+                    </div>
                   <div>
                     <span className="text-[10px] text-zinc-400 block sm:inline sm:mr-1">Rows:</span>
                     <strong>{previewResult.initial_rows.toLocaleString()} → {previewResult.transformed_rows.toLocaleString()}</strong>
@@ -2125,7 +2674,21 @@ export const TransformationStudioView = ({
             </div>
           )}
         </div>
+      )}
       </div>
+
+      {/* Delete Transformation Rule Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={deleteRuleConfirmModal.isOpen}
+        title={`Delete Transformation Rule?`}
+        message={`Are you sure you want to remove this ${deleteRuleConfirmModal.ruleType.toUpperCase()} rule? "${deleteRuleConfirmModal.ruleDescription}"`}
+        confirmText="Delete Rule"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={false}
+        onConfirm={confirmDeleteRule}
+        onCancel={() => setDeleteRuleConfirmModal({ isOpen: false, ruleIdx: null, ruleType: '', ruleDescription: '' })}
+      />
     </div>
   );
 };

@@ -25,6 +25,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 
 export const FlowsOverviewTrackerView = ({
   flows = [],
@@ -46,6 +47,41 @@ export const FlowsOverviewTrackerView = ({
   const [creatingFlow, setCreatingFlow] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
+
+  // Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState({
+    isOpen: false,
+    flowId: null,
+    flowName: '',
+    loading: false
+  });
+
+  const promptDeleteFlow = (flowId, flowName) => {
+    setDeleteConfirmModal({
+      isOpen: true,
+      flowId,
+      flowName,
+      loading: false
+    });
+  };
+
+  const confirmDeleteFlow = async () => {
+    const { flowId, flowName } = deleteConfirmModal;
+    if (!flowId) return;
+    setDeleteConfirmModal((prev) => ({ ...prev, loading: true }));
+    try {
+      await DataFlowAPI.deleteFlow(flowId);
+      setToastMsg(`Deleted Flow "${flowName}"`);
+      setTimeout(() => setToastMsg(null), 3500);
+      if (selectedFlowModal?.id === flowId) setSelectedFlowModal(null);
+      setDeleteConfirmModal({ isOpen: false, flowId: null, flowName: '', loading: false });
+      if (onRefreshFlows) onRefreshFlows();
+    } catch (err) {
+      setToastMsg(extractErrorMessage(err, 'Failed to delete flow'));
+      setTimeout(() => setToastMsg(null), 4000);
+      setDeleteConfirmModal({ isOpen: false, flowId: null, flowName: '', loading: false });
+    }
+  };
 
   // Sort flows strictly by creation order (earliest created to newest)
   const sortedFlows = [...flows].sort((a, b) => {
@@ -113,19 +149,6 @@ export const FlowsOverviewTrackerView = ({
       setCreateError(extractErrorMessage(err, 'Failed to create flow'));
     } finally {
       setCreatingFlow(false);
-    }
-  };
-
-  const handleDeleteFlow = async (flowId, flowName) => {
-    if (!window.confirm(`Are you sure you want to delete Flow "${flowName}"?`)) return;
-    try {
-      await DataFlowAPI.deleteFlow(flowId);
-      setToastMsg(`Deleted Flow "${flowName}"`);
-      setTimeout(() => setToastMsg(null), 3500);
-      if (selectedFlowModal?.id === flowId) setSelectedFlowModal(null);
-      if (onRefreshFlows) onRefreshFlows();
-    } catch (err) {
-      alert(extractErrorMessage(err, 'Failed to delete flow'));
     }
   };
 
@@ -676,7 +699,7 @@ export const FlowsOverviewTrackerView = ({
             <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => handleDeleteFlow(selectedFlowModal.id, selectedFlowModal.name)}
+                onClick={() => promptDeleteFlow(selectedFlowModal.id, selectedFlowModal.name)}
                 className="px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900/40 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/60 text-red-700 dark:text-red-400 text-xs font-medium flex items-center space-x-1 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -709,6 +732,19 @@ export const FlowsOverviewTrackerView = ({
           </div>
         </div>
       )}
+
+      {/* Delete Flow Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={deleteConfirmModal.isOpen}
+        title={`Delete Flow "${deleteConfirmModal.flowName}"?`}
+        message="Are you sure you want to delete this flow? All associated flow configurations, rules, and stages mapped to this flow will be permanently removed."
+        confirmText="Delete Flow"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={deleteConfirmModal.loading}
+        onConfirm={confirmDeleteFlow}
+        onCancel={() => setDeleteConfirmModal({ isOpen: false, flowId: null, flowName: '', loading: false })}
+      />
     </div>
   );
 };

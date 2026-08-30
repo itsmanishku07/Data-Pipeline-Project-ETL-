@@ -253,14 +253,22 @@ class TransformationEngine:
                         df[left_on] = df[left_on].astype(str)
                         df_target[right_on] = df_target[right_on].astype(str)
 
-                # Merge DataFrames
-                df = df.merge(
-                    df_target,
-                    left_on=left_on,
-                    right_on=right_on,
-                    how=how,
-                    suffixes=(suffix_left, suffix_right)
-                )
+                # Merge DataFrames cleanly
+                if left_on == right_on:
+                    df = df.merge(
+                        df_target,
+                        on=left_on,
+                        how=how,
+                        suffixes=(suffix_left, suffix_right)
+                    )
+                else:
+                    df = df.merge(
+                        df_target,
+                        left_on=left_on,
+                        right_on=right_on,
+                        how=how,
+                        suffixes=(suffix_left, suffix_right)
+                    )
 
         return df
 
