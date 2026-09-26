@@ -175,7 +175,7 @@ export const Sidebar = ({
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                 Workspace
               </span>
-              <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-600 hidden md:inline">⌘B</span>
+              <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-600 hidden md:inline">ctrl + B</span>
             </div>
 
             {navItems.map((item) => {
