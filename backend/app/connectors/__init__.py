@@ -3,6 +3,7 @@ from .s3_connector import S3Connector
 from .azure_connector import AzureLakehouseConnector
 from .database_connector import DatabaseConnector
 from .local_connector import LocalConnector
+from .databricks_connector import DatabricksConnector
 from ..models.schemas import SourceType, SourceConnectionRequest
 
 def get_connector(request: SourceConnectionRequest) -> BaseConnector:
@@ -15,5 +16,7 @@ def get_connector(request: SourceConnectionRequest) -> BaseConnector:
         return DatabaseConnector(request.database_config)
     elif stype in [SourceType.LOCAL_CATALOG, SourceType.FILE_UPLOAD]:
         return LocalConnector(request.local_config)
+    elif stype == SourceType.DATABRICKS:
+        return DatabricksConnector(request.databricks_config)
     else:
         raise ValueError(f"Unsupported source type: {stype}")

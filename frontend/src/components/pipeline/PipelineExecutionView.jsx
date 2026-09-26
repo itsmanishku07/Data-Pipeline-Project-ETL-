@@ -110,6 +110,17 @@ export const PipelineExecutionView = ({
   const [azureDestExplorerOpen, setAzureDestExplorerOpen] = useState(false);
   const [azureDestPrefix, setAzureDestPrefix] = useState('');
 
+  // Databricks Destination Settings
+  const [dbxHost, setDbxHost] = useState('adb-123456789.azuredatabricks.net');
+  const [dbxHttpPath, setDbxHttpPath] = useState('/sql/1.0/warehouses/a1b2c3d4e5f6');
+  const [dbxToken, setDbxToken] = useState('');
+  const [dbxCatalog, setDbxCatalog] = useState('main');
+  const [dbxSchema, setDbxSchema] = useState('default');
+  const [dbxTable, setDbxTable] = useState('curated_output');
+  const [dbxWriteMode, setDbxWriteMode] = useState('append');
+  const [createDbxTableIfNotExists, setCreateDbxTableIfNotExists] = useState(true);
+  const [showDbxDestToken, setShowDbxDestToken] = useState(false);
+
   // Saved Connections
   const [savedConnections, setSavedConnections] = useState([]);
   const [selectedSavedConnId, setSelectedSavedConnId] = useState('');
@@ -240,6 +251,15 @@ export const PipelineExecutionView = ({
       setS3Region(cfg.s3Region || 'us-east-1');
       setS3AccessKey(cfg.s3AccessKey || '');
       setS3SecretKey(cfg.s3SecretKey || '');
+    } else if (conn.source_type === 'databricks') {
+      setDestinationType('databricks');
+      const cfg = conn.config || {};
+      if (cfg.dbxHost) setDbxHost(cfg.dbxHost);
+      if (cfg.dbxHttpPath) setDbxHttpPath(cfg.dbxHttpPath);
+      if (cfg.dbxToken) setDbxToken(cfg.dbxToken);
+      if (cfg.dbxCatalog) setDbxCatalog(cfg.dbxCatalog);
+      if (cfg.dbxSchema) setDbxSchema(cfg.dbxSchema);
+      if (cfg.dbxTable) setDbxTable(cfg.dbxTable);
     } else if (conn.source_type === 'azure') {
       setDestinationType('azure');
       const cfg = conn.config || {};
@@ -303,6 +323,20 @@ export const PipelineExecutionView = ({
           access_key: s3AccessKey.trim() || undefined,
           secret_key: s3SecretKey.trim() || undefined,
           file_format: s3Format,
+        },
+      };
+    } else if (destinationType === 'databricks') {
+      return {
+        destination_type: 'databricks',
+        databricks_dest: {
+          server_hostname: dbxHost.trim(),
+          http_path: dbxHttpPath.trim(),
+          access_token: dbxToken.trim() || undefined,
+          catalog: dbxCatalog.trim() || 'main',
+          schema_name: dbxSchema.trim() || 'default',
+          table_name: dbxTable.trim() || (outputDatasetName || 'curated_output'),
+          write_mode: dbxWriteMode,
+          create_table_if_not_exists: createDbxTableIfNotExists,
         },
       };
     } else if (destinationType === 'azure') {
@@ -995,7 +1029,6 @@ export const PipelineExecutionView = ({
                       <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Storage Account *</label>
                       <input
                         type="text"
-                        placeholder="datalakeprod"
                         value={azureAccount}
                         onChange={(e) => setAzureAccount(e.target.value)}
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
@@ -1005,7 +1038,6 @@ export const PipelineExecutionView = ({
                       <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Blob Container *</label>
                       <input
                         type="text"
-                        placeholder="curated"
                         value={azureContainer}
                         onChange={(e) => setAzureContainer(e.target.value)}
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
@@ -1015,7 +1047,6 @@ export const PipelineExecutionView = ({
                       <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Account Key / SAS Token</label>
                       <input
                         type="password"
-                        placeholder="Optional for public/simulated"
                         value={azureKey}
                         onChange={(e) => setAzureKey(e.target.value)}
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
@@ -1043,7 +1074,6 @@ export const PipelineExecutionView = ({
                     <div className="flex items-center space-x-2">
                       <input
                         type="text"
-                        placeholder="e.g. curated/gold/ or analytics/2026/"
                         value={azureTargetFolder}
                         onChange={(e) => setAzureTargetFolder(e.target.value)}
                         className="flex-1 px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
@@ -1103,7 +1133,6 @@ export const PipelineExecutionView = ({
                       </label>
                       <input
                         type="text"
-                        placeholder={`${effectiveDataset?.name || 'transformed_data'}_curated.${azureFormat === 'delta' ? 'delta' : azureFormat}`}
                         value={azureTargetFile}
                         onChange={(e) => setAzureTargetFile(e.target.value)}
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
@@ -1282,7 +1311,6 @@ export const PipelineExecutionView = ({
                 <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Filter pipelines..."
                   value={historySearchTerm}
                   onChange={(e) => setHistorySearchTerm(e.target.value)}
                   className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-full sm:w-48 font-sans"

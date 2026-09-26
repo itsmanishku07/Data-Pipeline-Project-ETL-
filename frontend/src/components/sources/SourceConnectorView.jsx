@@ -1,31 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  GitBranch,
-  Plus,
-  X,
-  Database, 
-  Cloud, 
-  Layers, 
-  Upload,
-  CheckCircle2, 
-  AlertCircle, 
-  ArrowRight, 
-  RefreshCw, 
-  Table as TableIcon,
-  Code2,
-  Save,
-  Trash2,
-  BookmarkCheck,
-  Zap,
-  Server,
-  Search,
-  CheckSquare,
-  Square,
-  Folder,
-  FolderOpen,
-  FileText,
-  ChevronRight,
-  CornerDownRight
+import {
+  GitBranch, Plus, X, Database, Cloud, Layers, Upload, CheckCircle2, AlertCircle, ArrowRight, RefreshCw, Table as TableIcon, Code2, Save, Trash2, BookmarkCheck, Zap, Server, Search, CheckSquare, Square, Folder, FolderOpen, FileText, ChevronRight, CornerDownRight, Sparkles, Eye, EyeOff, Boxes, Check, TableProperties
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 
@@ -33,6 +8,7 @@ const sourceEngines = [
   { id: 'mysql', name: 'MySQL', icon: Database },
   { id: 'postgresql', name: 'PostgreSQL', icon: Database },
   { id: 'sqlserver', name: 'SQL Server', icon: Database },
+  { id: 'databricks', name: 'Databricks Unity Catalog', icon: Sparkles },
   { id: 's3', name: 'AWS S3', icon: Cloud },
   { id: 'azure', name: 'Azure Lakehouse', icon: Layers },
   { id: 'upload', name: 'Upload File', icon: Upload },
@@ -98,6 +74,23 @@ export const SourceConnectorView = ({
   const [isCustomSql, setIsCustomSql] = useState(false);
   const [tablesList, setTablesList] = useState([]);
   const [tableSearchTerm, setTableSearchTerm] = useState('');
+
+  // Databricks Unity Catalog Fields
+  const [dbxHost, setDbxHost] = useState('');
+  const [dbxHttpPath, setDbxHttpPath] = useState('');
+  const [dbxToken, setDbxToken] = useState('');
+  const [dbxCatalog, setDbxCatalog] = useState('');
+  const [dbxSchema, setDbxSchema] = useState('');
+  const [dbxTable, setDbxTable] = useState('');
+  const [dbxQuery, setDbxQuery] = useState('');
+  const [dbxIsCustomQuery, setDbxIsCustomQuery] = useState(false);
+  const [dbxCatalogsList, setDbxCatalogsList] = useState([]);
+  const [dbxSchemasList, setDbxSchemasList] = useState([]);
+  const [dbxTablesList, setDbxTablesList] = useState([]);
+  const [dbxLoadingCatalogs, setDbxLoadingCatalogs] = useState(false);
+  const [dbxLoadingSchemas, setDbxLoadingSchemas] = useState(false);
+  const [dbxLoadingTables, setDbxLoadingTables] = useState(false);
+  const [showDbxToken, setShowDbxToken] = useState(false);
 
   // Cloud S3 Fields
   const [s3Bucket, setS3Bucket] = useState('');
@@ -195,6 +188,8 @@ export const SourceConnectorView = ({
       setPort(1433);
       setUsername('sa');
       setConnectionName('My SQL Server');
+    } else if (srcId === 'databricks') {
+      setConnectionName('Databricks Unity Catalog');
     } else if (srcId === 's3') {
       setConnectionName('My AWS S3 Bucket');
     } else if (srcId === 'azure') {
@@ -202,6 +197,135 @@ export const SourceConnectorView = ({
     } else if (srcId === 'upload') {
       setConnectionName('Raw File Ingestion');
     }
+  };
+
+  const [dbxConnected, setDbxConnected] = useState(false);
+  const [dbxTableSearch, setDbxTableSearch] = useState('');
+
+  const handleFetchDbxCatalogs = async () => {
+    const host = dbxHost.trim();
+    const token = dbxToken.trim();
+    if (!host) {
+      setError('Please enter your Databricks Server Hostname (e.g. adb-xxxx.azuredatabricks.net).');
+      return;
+    }
+    if (!token) {
+      setError('Please enter your Databricks Personal Access Token (PAT).');
+      return;
+    }
+    setDbxLoadingCatalogs(true);
+    setError(null);
+    try {
+      const res = await DataFlowAPI.listDatabricksCatalogs({
+        source_type: 'databricks',
+        name: connectionName || 'Databricks Connection',
+        databricks_config: {
+          server_hostname: host,
+          http_path: dbxHttpPath.trim(),
+          access_token: token,
+          catalog: dbxCatalog.trim(),
+          schema_name: dbxSchema.trim()
+        }
+      });
+      const cats = Array.isArray(res.catalogs) ? res.catalogs : [];
+      setDbxCatalogsList(cats);
+      setDbxConnected(true);
+      if (cats.length > 0) {
+        const initialCat = dbxCatalog && cats.includes(dbxCatalog) ? dbxCatalog : cats[0];
+        setDbxCatalog(initialCat);
+        await handleFetchDbxSchemas(initialCat);
+      } else {
+        setDbxSchemasList([]);
+        setDbxTablesList([]);
+      }
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to connect to Databricks and fetch catalogs'));
+    } finally {
+      setDbxLoadingCatalogs(false);
+    }
+  };
+
+  const handleFetchDbxSchemas = async (targetCat = dbxCatalog) => {
+    const cat = targetCat || dbxCatalog;
+    const host = dbxHost.trim();
+    const token = dbxToken.trim();
+    if (!cat) return;
+    setDbxLoadingSchemas(true);
+    setError(null);
+    try {
+      const res = await DataFlowAPI.listDatabricksSchemas({
+        source_type: 'databricks',
+        name: connectionName || 'Databricks Connection',
+        databricks_config: {
+          server_hostname: host,
+          http_path: dbxHttpPath.trim(),
+          access_token: token,
+          catalog: cat,
+          schema_name: 'default'
+        }
+      });
+      const schs = Array.isArray(res.schemas) ? res.schemas : [];
+      setDbxSchemasList(schs);
+      if (schs.length > 0) {
+        const initialSch = dbxSchema && schs.includes(dbxSchema) ? dbxSchema : schs[0];
+        setDbxSchema(initialSch);
+        await handleFetchDbxTables(cat, initialSch);
+      } else {
+        setDbxTablesList([]);
+      }
+    } catch (err) {
+      setError(extractErrorMessage(err, `Failed to fetch schemas in catalog '${cat}'`));
+    } finally {
+      setDbxLoadingSchemas(false);
+    }
+  };
+
+  const handleFetchDbxTables = async (targetCat = dbxCatalog, targetSch = dbxSchema) => {
+    const cat = targetCat || dbxCatalog;
+    const sch = targetSch || dbxSchema;
+    const host = dbxHost.trim();
+    const token = dbxToken.trim();
+    if (!cat || !sch) return;
+    setDbxLoadingTables(true);
+    setError(null);
+    try {
+      const res = await DataFlowAPI.listDatabricksTables({
+        source_type: 'databricks',
+        name: connectionName || 'Databricks Connection',
+        databricks_config: {
+          server_hostname: host,
+          http_path: dbxHttpPath.trim(),
+          access_token: token,
+          catalog: cat,
+          schema_name: sch
+        }
+      });
+      const tbls = Array.isArray(res.tables) ? res.tables : [];
+      setDbxTablesList(tbls);
+      if (tbls.length > 0) {
+        if (!dbxTable || !tbls.some(t => t.name === dbxTable)) {
+          setDbxTable(tbls[0].name);
+        }
+      } else {
+        setDbxTable('');
+      }
+    } catch (err) {
+      setError(extractErrorMessage(err, `Failed to fetch tables in '${cat}.${sch}'`));
+    } finally {
+      setDbxLoadingTables(false);
+    }
+  };
+
+  const handleSelectCatalog = async (catName) => {
+    setDbxCatalog(catName);
+    setDbxTable('');
+    await handleFetchDbxSchemas(catName);
+  };
+
+  const handleSelectSchema = async (schName) => {
+    setDbxSchema(schName);
+    setDbxTable('');
+    await handleFetchDbxTables(dbxCatalog, schName);
   };
 
   const handleBrowseAzure = async (targetPrefix = '') => {
@@ -239,7 +363,7 @@ export const SourceConnectorView = ({
   const handleSelectAzureFile = (file) => {
     setAzurePath(file.path);
     const fmt = (file.format || '').toLowerCase();
-    if (['parquet', 'delta', 'csv', 'json', 'tsv'].includes(fmt)) {
+    if (['parquet', 'delta', 'csv', 'json'].includes(fmt)) {
       setAzureFormat(fmt);
     } else if (file.path.endsWith('.parquet')) {
       setAzureFormat('parquet');
@@ -247,10 +371,6 @@ export const SourceConnectorView = ({
       setAzureFormat('csv');
     } else if (file.path.endsWith('.json')) {
       setAzureFormat('json');
-    } else if (file.path.endsWith('.tsv')) {
-      setAzureFormat('csv');
-    } else {
-      setAzureFormat('auto');
     }
   };
 
@@ -271,6 +391,23 @@ export const SourceConnectorView = ({
           password: password || undefined,
           table_name: !isCustomSql ? selectedTable.trim() : undefined,
           query: isCustomSql ? customSql.trim() : undefined,
+        },
+      };
+    } else if (activeSource === 'databricks') {
+      const targetTable = dbxIsCustomQuery 
+        ? 'Custom SQL Query' 
+        : (dbxTable ? `${dbxCatalog}.${dbxSchema}.${dbxTable}` : `${dbxCatalog}.${dbxSchema}`);
+      return {
+        source_type: 'databricks',
+        name: connectionName || `Databricks: ${targetTable}`,
+        databricks_config: {
+          server_hostname: dbxHost.trim(),
+          http_path: dbxHttpPath.trim(),
+          access_token: dbxToken.trim() || undefined,
+          catalog: dbxCatalog.trim(),
+          schema_name: dbxSchema.trim(),
+          table_name: !dbxIsCustomQuery && dbxTable ? dbxTable.trim() : undefined,
+          query: dbxIsCustomQuery && dbxQuery ? dbxQuery.trim() : undefined,
         },
       };
     } else if (activeSource === 's3') {
@@ -323,6 +460,21 @@ export const SourceConnectorView = ({
       if (['postgresql', 'mysql', 'sqlserver'].includes(activeSource)) {
         summary = `${host}:${port}/${dbName || 'default'} (user: ${username})`;
         config = { host, port: Number(port), dbName, username, password, selectedTable, isCustomSql, customSql };
+      } else if (activeSource === 'databricks') {
+        const targetTable = dbxIsCustomQuery 
+          ? 'Custom SQL Query' 
+          : (dbxTable ? `${dbxCatalog}.${dbxSchema}.${dbxTable}` : `${dbxCatalog || 'catalog'}.${dbxSchema || 'schema'}`);
+        summary = `${dbxHost || 'databricks'} / ${targetTable}`;
+        config = {
+          dbxHost,
+          dbxHttpPath,
+          dbxToken,
+          dbxCatalog,
+          dbxSchema,
+          dbxTable,
+          dbxQuery,
+          dbxIsCustomQuery,
+        };
       } else if (activeSource === 's3') {
         summary = `s3://${s3Bucket}/${s3Key}`;
         config = { s3Bucket, s3Key, s3Format, s3AccessKey, s3SecretKey, s3Region };
@@ -365,6 +517,29 @@ export const SourceConnectorView = ({
       setSelectedTable(cfg.selectedTable || '');
       setIsCustomSql(cfg.isCustomSql || false);
       setCustomSql(cfg.customSql || '');
+    } else if (saved.source_type === 'databricks') {
+      if (cfg.dbxHost) setDbxHost(cfg.dbxHost);
+      if (cfg.dbxHttpPath) setDbxHttpPath(cfg.dbxHttpPath);
+      if (cfg.dbxToken) setDbxToken(cfg.dbxToken);
+      if (cfg.dbxCatalog) {
+        setDbxCatalog(cfg.dbxCatalog);
+        setDbxCatalogsList((prev) => (prev.includes(cfg.dbxCatalog) ? prev : [...prev, cfg.dbxCatalog]));
+      }
+      if (cfg.dbxSchema) {
+        setDbxSchema(cfg.dbxSchema);
+        setDbxSchemasList((prev) => (prev.includes(cfg.dbxSchema) ? prev : [...prev, cfg.dbxSchema]));
+      }
+      if (cfg.dbxTable) {
+        setDbxTable(cfg.dbxTable);
+        setDbxTablesList((prev) =>
+          prev.some((t) => t.name === cfg.dbxTable)
+            ? prev
+            : [...prev, { name: cfg.dbxTable, full_name: `${cfg.dbxCatalog || ''}.${cfg.dbxSchema || ''}.${cfg.dbxTable}`, table_type: 'DELTA' }]
+        );
+      }
+      if (cfg.dbxQuery) setDbxQuery(cfg.dbxQuery);
+      if (cfg.dbxIsCustomQuery !== undefined) setDbxIsCustomQuery(cfg.dbxIsCustomQuery);
+      if (cfg.dbxHost) setDbxConnected(true);
     } else if (saved.source_type === 's3') {
       setS3Bucket(cfg.s3Bucket || '');
       setS3Key(cfg.s3Key || '');
@@ -416,6 +591,12 @@ export const SourceConnectorView = ({
           }
         } catch (e) {
           console.warn('Failed to load tables list', e);
+        }
+      } else if (res.success && activeSource === 'databricks') {
+        try {
+          await handleFetchDbxCatalogs();
+        } catch (e) {
+          console.warn('Failed to auto-fetch Databricks catalogs', e);
         }
       }
     } catch (err) {
@@ -494,7 +675,6 @@ export const SourceConnectorView = ({
             <input
               type="text"
               required
-              placeholder="e.g. Sales Revenue Pipeline"
               value={newFlowName}
               onChange={(e) => setNewFlowName(e.target.value)}
               className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -520,7 +700,6 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
               <input
                 type="text"
-                placeholder="Optional notes"
                 value={newFlowDesc}
                 onChange={(e) => setNewFlowDesc(e.target.value)}
                 className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -625,7 +804,6 @@ export const SourceConnectorView = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sales Revenue Pipeline"
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
                   className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -652,7 +830,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
                 <textarea
                   rows={2}
-                  placeholder="Optional flow notes..."
                   value={newFlowDesc}
                   onChange={(e) => setNewFlowDesc(e.target.value)}
                   className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"
@@ -899,9 +1076,7 @@ export const SourceConnectorView = ({
             <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
               {activeSource.toUpperCase()} Connection & Extraction
             </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Enter credentials to connect to your live data source or storage.
-            </p>
+           
           </div>
 
           <button
@@ -922,7 +1097,6 @@ export const SourceConnectorView = ({
           </label>
           <input
             type="text"
-            placeholder="e.g. Production Analytics DB"
             value={connectionName}
             onChange={(e) => setConnectionName(e.target.value)}
             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-sans"
@@ -937,7 +1111,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Host / Server IP *</label>
                 <input
                   type="text"
-                  placeholder="localhost or db.company.com"
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -948,7 +1121,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
                 <input
                   type="number"
-                  placeholder="3306"
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -959,7 +1131,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
                 <input
                   type="text"
-                  placeholder="e.g. sales_db"
                   value={dbName}
                   onChange={(e) => setDbName(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -972,7 +1143,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
                 <input
                   type="text"
-                  placeholder="Username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -983,7 +1153,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
                 <input
                   type="password"
-                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1030,7 +1199,6 @@ export const SourceConnectorView = ({
                           <Search className="w-3 h-3 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
-                            placeholder="Filter tables..."
                             value={tableSearchTerm}
                             onChange={(e) => setTableSearchTerm(e.target.value)}
                             className="pl-7 pr-2.5 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-44 font-mono"
@@ -1086,13 +1254,9 @@ export const SourceConnectorView = ({
                         <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Target Table Name
                         </label>
-                        <span className="text-[11px] text-zinc-400">
-                          (Click "Test & Fetch Tables" below)
-                        </span>
                       </div>
                       <input
                         type="text"
-                        placeholder="e.g. orders, users, transactions"
                         value={selectedTable}
                         onChange={(e) => setSelectedTable(e.target.value)}
                         className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1105,7 +1269,6 @@ export const SourceConnectorView = ({
                   <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Custom SQL Query</label>
                   <textarea
                     rows={3}
-                    placeholder="SELECT id, amount, created_at FROM orders WHERE status = 'COMPLETED'"
                     value={customSql}
                     onChange={(e) => setCustomSql(e.target.value)}
                     className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -1116,6 +1279,360 @@ export const SourceConnectorView = ({
           </div>
         )}
 
+        {/* Databricks Unity Catalog & SQL Warehouse Form */}
+        {activeSource === 'databricks' && (
+          <div className="space-y-4">
+            {/* Header info banner */}
+            <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/50 rounded-xl text-xs text-indigo-950 dark:text-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                    Databricks Unity Catalog & SQL Warehouse
+                  </h4>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Extract live Delta tables with 3-tier catalog, schema, and table navigation.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSaveCurrentConnection}
+                  className="px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-medium text-indigo-700 dark:text-indigo-300 flex items-center space-x-1.5 shadow-xs transition-colors"
+                  title="Save Databricks Connection"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Connection</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleFetchDbxCatalogs}
+                  disabled={dbxLoadingCatalogs}
+                  className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${dbxLoadingCatalogs ? 'animate-spin' : ''}`} />
+                  <span>{dbxLoadingCatalogs ? 'Connecting...' : dbxConnected ? 'Re-scan Catalogs' : 'Connect & Discover'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Connection Credentials Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-zinc-50/50 dark:bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Databricks Server Hostname *
+                </label>
+                <input
+                  type="text"
+                  value={dbxHost}
+                  onChange={(e) => setDbxHost(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  SQL Warehouse HTTP Path *
+                </label>
+                <input
+                  type="text"
+                  value={dbxHttpPath}
+                  onChange={(e) => setDbxHttpPath(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                    Personal Access Token (PAT) / OAuth Token
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDbxToken(!showDbxToken)}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center space-x-1"
+                  >
+                    {showDbxToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{showDbxToken ? 'Hide Token' : 'Show Token'}</span>
+                  </button>
+                </div>
+                <input
+                  type={showDbxToken ? 'text' : 'password'}
+                  value={dbxToken}
+                  onChange={(e) => setDbxToken(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Ingestion Strategy Switch */}
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  Data Selection Mode:
+                </span>
+                {dbxTable && !dbxIsCustomQuery && (
+                  <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold flex items-center space-x-1">
+                    <Check className="w-3 h-3" />
+                    <span>{dbxCatalog}.{dbxSchema}.{dbxTable}</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-1.5 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setDbxIsCustomQuery(false)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    !dbxIsCustomQuery
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Unity Catalog Explorer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDbxIsCustomQuery(true)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    dbxIsCustomQuery
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Custom SQL
+                </button>
+              </div>
+            </div>
+
+            {/* LIVE HIERARCHY EXPLORER */}
+            {!dbxIsCustomQuery ? (
+              <div className="space-y-4">
+                {/* When not connected yet or no catalogs loaded */}
+                {!dbxConnected && dbxCatalogsList.length === 0 && (
+                  <div className="p-6 text-center rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-dashed border-zinc-300 dark:border-zinc-800 space-y-3">
+                    <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
+                      <Boxes className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                        No Catalogs Loaded Yet
+                      </h4>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
+                        Enter your Databricks Server Hostname, SQL Warehouse HTTP Path, and Access Token (PAT) above, then click <strong>Connect & Discover Catalogs</strong> to load your live workspace.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleFetchDbxCatalogs}
+                      disabled={dbxLoadingCatalogs}
+                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-xs transition-colors inline-flex items-center space-x-1.5 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${dbxLoadingCatalogs ? 'animate-spin' : ''}`} />
+                      <span>{dbxLoadingCatalogs ? 'Connecting to Databricks...' : 'Connect & Discover Catalogs'}</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* When catalogs are available */}
+                {dbxCatalogsList.length > 0 && (
+                  <>
+                    {/* STEP 1: CATALOGS */}
+                    <div className="space-y-2 bg-zinc-50/70 dark:bg-zinc-950/50 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center space-x-1.5">
+                          <Boxes className="w-4 h-4 text-indigo-500" />
+                          <span>1. Select Unity Catalog</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                            {dbxCatalogsList.length} Catalogs
+                          </span>
+                        </span>
+                        {dbxLoadingCatalogs && (
+                          <span className="text-[11px] text-zinc-400 flex items-center space-x-1">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Refreshing catalogs...</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {dbxCatalogsList.map((cat) => {
+                          const isSelected = dbxCatalog === cat;
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => handleSelectCatalog(cat)}
+                              className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all flex items-center space-x-1.5 ${
+                                isSelected
+                                  ? 'bg-indigo-600 text-white shadow-xs font-semibold ring-2 ring-indigo-500/20'
+                                  : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400'
+                              }`}
+                            >
+                              <Boxes className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                              <span>{cat}</span>
+                              {isSelected && <Check className="w-3 h-3 ml-1" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* STEP 2: SCHEMAS */}
+                    <div className="space-y-2 bg-zinc-50/70 dark:bg-zinc-950/50 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center space-x-1.5">
+                          <Folder className="w-4 h-4 text-sky-500" />
+                          <span>2. Select Schema in '{dbxCatalog}'</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                            {dbxSchemasList.length} Schemas
+                          </span>
+                        </span>
+                        {dbxLoadingSchemas && (
+                          <span className="text-[11px] text-zinc-400 flex items-center space-x-1">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Loading schemas...</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {dbxSchemasList.length === 0 ? (
+                        <p className="text-xs text-zinc-500 italic py-1">No schemas found in catalog '{dbxCatalog}'.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {dbxSchemasList.map((sch) => {
+                            const isSelected = dbxSchema === sch;
+                            return (
+                              <button
+                                key={sch}
+                                type="button"
+                                onClick={() => handleSelectSchema(sch)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all flex items-center space-x-1.5 ${
+                                  isSelected
+                                    ? 'bg-sky-600 text-white shadow-xs font-semibold ring-2 ring-sky-500/20'
+                                    : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400'
+                                }`}
+                              >
+                                <Folder className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                                <span>{sch}</span>
+                                {isSelected && <Check className="w-3 h-3 ml-1" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* STEP 3: TABLES EXPLORER */}
+                    <div className="space-y-2.5 bg-zinc-50/70 dark:bg-zinc-950/50 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center space-x-1.5">
+                          <TableProperties className="w-4 h-4 text-indigo-500" />
+                          <span>3. Select Table in '{dbxCatalog}.{dbxSchema}'</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                            {dbxTablesList.length} Tables
+                          </span>
+                        </span>
+
+                        {dbxTablesList.length > 0 && (
+                          <div className="relative w-full sm:w-56">
+                            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              value={dbxTableSearch}
+                              onChange={(e) => setDbxTableSearch(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {dbxLoadingTables ? (
+                        <div className="p-6 text-center text-xs text-zinc-400 flex items-center justify-center space-x-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-indigo-500" />
+                          <span>Loading tables in '{dbxCatalog}.{dbxSchema}'...</span>
+                        </div>
+                      ) : dbxTablesList.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-zinc-500 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                          No tables found in schema <strong>{dbxCatalog}.{dbxSchema}</strong>.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto p-1">
+                          {dbxTablesList
+                            .filter((t) => !dbxTableSearch || t.name.toLowerCase().includes(dbxTableSearch.toLowerCase()))
+                            .map((t) => {
+                              const isSelected = dbxTable === t.name;
+                              return (
+                                <div
+                                  key={t.name}
+                                  onClick={() => setDbxTable(t.name)}
+                                  className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 select-none ${
+                                    isSelected
+                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/30'
+                                      : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 text-zinc-800 dark:text-zinc-200'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-1.5">
+                                    <div className="flex items-center space-x-2 min-w-0">
+                                      <TableIcon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-indigo-500'}`} />
+                                      <span className="font-mono text-xs font-bold truncate">
+                                        {t.name}
+                                      </span>
+                                    </div>
+                                    <span className={`text-[9px] uppercase font-mono font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                                      isSelected ? 'bg-white/20 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                                    }`}>
+                                      {t.table_type || 'DELTA'}
+                                    </span>
+                                  </div>
+
+                                  <p className={`text-[10px] font-mono truncate ${isSelected ? 'text-indigo-100' : 'text-zinc-400'}`}>
+                                    {dbxCatalog}.{dbxSchema}.{t.name}
+                                  </p>
+
+                                  <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-white/20 dark:border-zinc-800/80">
+                                    <span className={isSelected ? 'text-indigo-100' : 'text-zinc-400'}>
+                                      {isSelected ? 'Selected for extraction' : 'Click to select table'}
+                                    </span>
+                                    {isSelected ? (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                                    ) : (
+                                      <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  Databricks SQL Query
+                </label>
+                <textarea
+                  rows={4}
+                  value={dbxQuery}
+                  onChange={(e) => setDbxQuery(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <p className="text-[11px] text-zinc-400">
+                  You can write standard ANSI SQL queries across Unity Catalog tables.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Cloud AWS S3 Config */}
         {activeSource === 's3' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1123,7 +1640,6 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">S3 Bucket Name *</label>
               <input
                 type="text"
-                placeholder="my-production-lakehouse-bucket"
                 value={s3Bucket}
                 onChange={(e) => setS3Bucket(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1134,7 +1650,6 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Key Prefix / File Path *</label>
               <input
                 type="text"
-                placeholder="data/raw/sales.parquet"
                 value={s3Key}
                 onChange={(e) => setS3Key(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1145,7 +1660,6 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">AWS Access Key ID</label>
               <input
                 type="text"
-                placeholder="AKIAIOSFODNN7EXAMPLE"
                 value={s3AccessKey}
                 onChange={(e) => setS3AccessKey(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1156,7 +1670,6 @@ export const SourceConnectorView = ({
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">AWS Secret Access Key</label>
               <input
                 type="password"
-                placeholder="••••••••••••••••"
                 value={s3SecretKey}
                 onChange={(e) => setS3SecretKey(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1173,7 +1686,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Storage Account Name *</label>
                 <input
                   type="text"
-                  placeholder=""
                   value={azureAccount}
                   onChange={(e) => setAzureAccount(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1184,7 +1696,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Container Name *</label>
                 <input
                   type="text"
-                  placeholder=""
                   value={azureContainer}
                   onChange={(e) => setAzureContainer(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1195,7 +1706,6 @@ export const SourceConnectorView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Account Key / SAS Token</label>
                 <input
                   type="password"
-                  placeholder="Key, SAS token, or Conn String"
                   value={azureKey}
                   onChange={(e) => setAzureKey(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
@@ -1276,7 +1786,6 @@ export const SourceConnectorView = ({
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                     <input
                       type="text"
-                      placeholder="Filter files..."
                       value={azureSearchTerm}
                       onChange={(e) => setAzureSearchTerm(e.target.value)}
                       className="w-full pl-8 pr-3 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -1370,36 +1879,42 @@ export const SourceConnectorView = ({
               </div>
             )}
 
-            {/* Selected File Confirmation Badge & Format Selector */}
-            {azurePath ? (
-              <div className="p-3 rounded-md bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-mono text-emerald-700 dark:text-emerald-300">
-                <div className="flex items-center space-x-2 min-w-0 flex-1">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span className="truncate">
-                    Selected Source: <strong>abfss://{azureContainer || 'container'}@{azureAccount || 'account'}.dfs.core.windows.net/{azurePath}</strong>
-                  </span>
-                </div>
-                <div className="flex items-center space-x-1.5 shrink-0 self-end sm:self-auto">
-                  <span className="text-[10px] text-emerald-800/70 dark:text-emerald-300/70 uppercase">Format:</span>
-                  <select
-                    value={azureFormat}
-                    onChange={(e) => setAzureFormat(e.target.value)}
-                    className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-white dark:bg-zinc-900 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 focus:outline-none"
-                  >
-                    <option value="auto">Auto-detect</option>
-                    <option value="csv">CSV / Delimited</option>
-                    <option value="parquet">Parquet</option>
-                    <option value="json">JSON</option>
-                    <option value="delta">Delta Lake</option>
-                  </select>
-                </div>
+            {/* Selected Blob Path and Format Confirmation */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  Selected Blob Path *
+                </label>
+                <input
+                  type="text"
+                  value={azurePath}
+                  onChange={(e) => setAzurePath(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 font-mono"
+                />
               </div>
-            ) : (
-              azureExplorerOpen && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">
-                  Click on any file in the explorer above to select it as the pipeline source.
-                </p>
-              )
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  File Format *
+                </label>
+                <select
+                  value={azureFormat}
+                  onChange={(e) => setAzureFormat(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none font-mono"
+                >
+                  <option value="parquet">Parquet</option>
+                  <option value="delta">Delta Lake</option>
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                </select>
+              </div>
+            </div>
+
+            {azurePath && (
+              <p className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-medium flex items-center space-x-1">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Selected Source: <strong>abfss://{azureContainer || 'container'}@{azureAccount || 'account'}.dfs.core.windows.net/{azurePath}</strong></span>
+              </p>
             )}
           </div>
         )}

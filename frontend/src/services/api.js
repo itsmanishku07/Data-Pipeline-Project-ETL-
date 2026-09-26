@@ -139,6 +139,21 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  listDatabricksCatalogs: async (req) => {
+    const res = await api.post('/sources/databricks/catalogs', req);
+    return res.data;
+  },
+
+  listDatabricksSchemas: async (req) => {
+    const res = await api.post('/sources/databricks/schemas', req);
+    return res.data;
+  },
+
+  listDatabricksTables: async (req) => {
+    const res = await api.post('/sources/databricks/tables', req);
+    return res.data;
+  },
+
   inspectSource: async (req, limit = 100) => {
     const res = await api.post(`/sources/inspect?limit=${limit}`, req);
     return res.data;

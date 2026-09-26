@@ -107,6 +107,45 @@ def browse_azure_container(payload: Dict[str, Any]):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/databricks/catalogs")
+def list_databricks_catalogs(request: SourceConnectionRequest):
+    """List Unity Catalog catalogs from Databricks SQL Warehouse."""
+    try:
+        if request.source_type != "databricks" or not request.databricks_config:
+            return {"catalogs": ["main", "samples", "workspace", "hive_metastore"]}
+        from ..connectors.databricks_connector import DatabricksConnector
+        conn = DatabricksConnector(request.databricks_config)
+        catalogs = conn.get_catalogs()
+        return {"catalogs": catalogs}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch Databricks catalogs: {str(e)}")
+
+@router.post("/databricks/schemas")
+def list_databricks_schemas(request: SourceConnectionRequest):
+    """List schemas in a Databricks catalog."""
+    try:
+        if request.source_type != "databricks" or not request.databricks_config:
+            return {"schemas": ["default", "information_schema"]}
+        from ..connectors.databricks_connector import DatabricksConnector
+        conn = DatabricksConnector(request.databricks_config)
+        schemas = conn.get_schemas(catalog=request.databricks_config.catalog)
+        return {"schemas": schemas}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch Databricks schemas: {str(e)}")
+
+@router.post("/databricks/tables")
+def list_databricks_tables(request: SourceConnectionRequest):
+    """List tables in a Databricks catalog and schema."""
+    try:
+        if request.source_type != "databricks" or not request.databricks_config:
+            return {"tables": []}
+        from ..connectors.databricks_connector import DatabricksConnector
+        conn = DatabricksConnector(request.databricks_config)
+        tables = conn.get_tables(catalog=request.databricks_config.catalog, schema=request.databricks_config.schema_name)
+        return {"tables": tables}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch Databricks tables: {str(e)}")
+
 @router.post("/inspect", response_model=SchemaInspectionResult)
 def inspect_source(request: SourceConnectionRequest, background_tasks: BackgroundTasks, limit: int = 100):
     start_t = time.time()

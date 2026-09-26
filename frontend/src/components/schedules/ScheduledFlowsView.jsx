@@ -584,7 +584,6 @@ export const ScheduledFlowsView = ({ flows = [], allDatasets = [], activeFlowId,
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             type="text"
-            placeholder="Search schedules by flow, name, or cron expression..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -985,6 +984,14 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
       if (cfg.azureFormat || cfg.file_format || cfg.format) {
         setAzureFormat(cfg.azureFormat || cfg.file_format || cfg.format);
       }
+    } else if (st === 'databricks') {
+      setDestType('databricks');
+      if (cfg.dbxHost) setDbxHost(cfg.dbxHost);
+      if (cfg.dbxHttpPath) setDbxHttpPath(cfg.dbxHttpPath);
+      if (cfg.dbxToken) setDbxToken(cfg.dbxToken);
+      if (cfg.dbxCatalog) setDbxCatalog(cfg.dbxCatalog);
+      if (cfg.dbxSchema) setDbxSchema(cfg.dbxSchema);
+      if (cfg.dbxTable) setDbxTable(cfg.dbxTable);
     } else if (st === 's3') {
       setDestType('s3');
       setS3Bucket(cfg.s3Bucket || cfg.bucket_name || cfg.bucket || '');
@@ -1099,6 +1106,19 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
             username: dbUser || 'root',
             password: dbPassword || undefined,
             write_mode: dbWriteMode || 'append'
+          }
+        };
+      } else if (destType === 'databricks' || destType === 'databricks_catalog') {
+        destinationConfig = {
+          destination_type: 'databricks',
+          databricks_dest: {
+            server_hostname: dbxHost || 'adb-123456789.azuredatabricks.net',
+            http_path: dbxHttpPath || '/sql/1.0/warehouses/a1b2c3d4e5f6',
+            access_token: dbxToken || undefined,
+            catalog: dbxCatalog || 'main',
+            schema_name: dbxSchema || 'default',
+            table_name: dbxTable || 'curated_output',
+            write_mode: dbxWriteMode || 'append'
           }
         };
       } else if (destType === 's3') {
@@ -1233,7 +1253,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Daily Payment Curated Export"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -1290,7 +1309,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                 Description <span className="text-zinc-400 font-normal">(Optional)</span>
               </label>
               <textarea
-                placeholder="Details on what downstream consumer uses this data and export SLA..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
@@ -1376,7 +1394,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                           <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
-                            placeholder="Search interval frequencies (e.g. 5 min, hourly, daily, midnight)..."
                             value={intervalSearchTerm}
                             onChange={(e) => setIntervalSearchTerm(e.target.value)}
                             autoFocus
@@ -1444,7 +1461,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                   type="text"
                   value={cronExpression}
                   onChange={(e) => setCronExpression(e.target.value)}
-                  placeholder="*/15 * * * *"
                   className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
@@ -1640,7 +1656,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={azureAccount}
                       onChange={(e) => setAzureAccount(e.target.value)}
-                      placeholder="e.g. adfstorage07"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs"
                     />
                   </div>
@@ -1650,7 +1665,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={azureContainer}
                       onChange={(e) => setAzureContainer(e.target.value)}
-                      placeholder="e.g. adf-container"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs"
                     />
                   </div>
@@ -1663,7 +1677,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={azurePath}
                       onChange={(e) => setAzurePath(e.target.value)}
-                      placeholder="e.g. exports/sales_curated.csv"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono"
                     />
                   </div>
@@ -1702,7 +1715,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type={showAzureConnString ? 'text' : 'password'}
                       value={azureConnString}
                       onChange={(e) => setAzureConnString(e.target.value)}
-                      placeholder="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;"
                       className="w-full pl-3 pr-10 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                     <button
@@ -1740,7 +1752,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={dbHost}
                       onChange={(e) => setDbHost(e.target.value)}
-                      placeholder="localhost"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs"
                     />
                   </div>
@@ -1840,7 +1851,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={s3Bucket}
                       onChange={(e) => setS3Bucket(e.target.value)}
-                      placeholder="e.g. my-lakehouse-bucket"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs"
                     />
                   </div>
@@ -1850,7 +1860,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={s3Region}
                       onChange={(e) => setS3Region(e.target.value)}
-                      placeholder="e.g. us-east-1"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs"
                     />
                   </div>
@@ -1863,7 +1872,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={s3Key}
                       onChange={(e) => setS3Key(e.target.value)}
-                      placeholder="e.g. exports/curated_data.parquet"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono"
                     />
                   </div>
@@ -1888,7 +1896,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                       type="text"
                       value={s3AccessKey}
                       onChange={(e) => setS3AccessKey(e.target.value)}
-                      placeholder="AKIAIOSFODNN7EXAMPLE"
                       className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono"
                     />
                   </div>
@@ -1910,7 +1917,6 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                         type={showS3SecretKey ? 'text' : 'password'}
                         value={s3SecretKey}
                         onChange={(e) => setS3SecretKey(e.target.value)}
-                        placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
                         className="w-full pl-3 pr-8 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono"
                       />
                       <button

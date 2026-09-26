@@ -17,7 +17,8 @@ from ..models.schemas import (
     DestinationTypeEnum,
     DatabaseDestinationConfig,
     S3DestinationConfig,
-    AzureDestinationConfig
+    AzureDestinationConfig,
+    DatabricksDestinationConfig
 )
 from ..models.db_models import CatalogDB
 from ..engine.transform_engine import TransformationEngine
@@ -165,6 +166,28 @@ class JobService:
             except Exception as e:
                 return {"success": False, "message": f"Azure test failed: {str(e)}"}
 
+        elif dest_type in (DestinationTypeEnum.DATABRICKS, DestinationTypeEnum.DATABRICKS_CATALOG) and dest_req.databricks_dest:
+            cfg = dest_req.databricks_dest
+            try:
+                from ..connectors.databricks_connector import DatabricksConnector
+                from ..models.schemas import DatabricksSourceConfig
+                db_cfg = DatabricksSourceConfig(
+                    server_hostname=cfg.server_hostname,
+                    http_path=cfg.http_path,
+                    access_token=cfg.access_token,
+                    catalog=cfg.catalog,
+                    schema_name=cfg.schema_name,
+                    table_name=cfg.table_name
+                )
+                conn = DatabricksConnector(db_cfg)
+                ok, msg = conn.test_connection()
+                if ok:
+                    return {"success": True, "message": f"Successfully validated Databricks Unity Catalog target '{cfg.catalog}.{cfg.schema_name}.{cfg.table_name}' on '{cfg.server_hostname}'"}
+                else:
+                    return {"success": False, "message": msg}
+            except Exception as e:
+                return {"success": False, "message": f"Databricks destination test failed: {str(e)}"}
+
         return {"success": True, "message": "Destination configuration accepted."}
 
     @staticmethod
@@ -202,6 +225,28 @@ class JobService:
             logs.append(f"[DESTINATION URI] {res['url']}")
         except Exception as e:
             err_msg = f"Azure export failed: {str(e)}"
+            logs.append(f"[DESTINATION ERROR] {err_msg}")
+            raise RuntimeError(err_msg)
+
+    @staticmethod
+    def _export_to_databricks(df: pd.DataFrame, cfg: DatabricksDestinationConfig, logs: List[str]):
+        logs.append(f"[DESTINATION] Connecting to Databricks Unity Catalog `{cfg.catalog}`.`{cfg.schema_name}` on {cfg.server_hostname}...")
+        try:
+            from ..connectors.databricks_connector import DatabricksConnector
+            from ..models.schemas import DatabricksSourceConfig
+            db_cfg = DatabricksSourceConfig(
+                server_hostname=cfg.server_hostname,
+                http_path=cfg.http_path,
+                access_token=cfg.access_token,
+                catalog=cfg.catalog,
+                schema_name=cfg.schema_name,
+                table_name=cfg.table_name
+            )
+            connector = DatabricksConnector(db_cfg)
+            res = connector.write_data(df, table_name=cfg.table_name, write_mode=cfg.write_mode)
+            logs.append(f"[DESTINATION SUCCESS] Successfully loaded {res['rows_written']} rows into Databricks Delta table '{res['table_name']}' (Mode: {cfg.write_mode.upper()}).")
+        except Exception as e:
+            err_msg = f"Databricks export failed: {str(e)}"
             logs.append(f"[DESTINATION ERROR] {err_msg}")
             raise RuntimeError(err_msg)
 
@@ -405,6 +450,8 @@ class JobService:
                     JobService._export_to_s3(df_out, dest.s3_dest, logs)
                 elif dest.destination_type in (DestinationTypeEnum.AZURE, DestinationTypeEnum.AZURE_LAKEHOUSE) and dest.azure_dest:
                     JobService._export_to_azure(df_out, dest.azure_dest, logs)
+                elif dest.destination_type in (DestinationTypeEnum.DATABRICKS, DestinationTypeEnum.DATABRICKS_CATALOG) and dest.databricks_dest:
+                    JobService._export_to_databricks(df_out, dest.databricks_dest, logs)
 
             # Record Ingestion & Transformation History
             CatalogDB.record_transformation(

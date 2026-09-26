@@ -10,6 +10,7 @@ class SourceType(str, Enum):
     LOCAL_CATALOG = "local_catalog"
     FILE_UPLOAD = "file_upload"
     TRANSFORMED_PIPELINE = "transformed_pipeline"
+    DATABRICKS = "databricks"
 
 class FileFormat(str, Enum):
     AUTO = "auto"
@@ -94,6 +95,15 @@ class DatabaseSourceConfig(BaseModel):
     query: Optional[str] = None
     sqlite_path: Optional[str] = None
 
+class DatabricksSourceConfig(BaseModel):
+    server_hostname: str = Field(..., description="Databricks Server Hostname (e.g. adb-xxxx.azuredatabricks.net or dbc-xxxx.cloud.databricks.com)")
+    http_path: str = Field(..., description="SQL Warehouse HTTP Path (e.g. /sql/1.0/warehouses/xxxx)")
+    access_token: Optional[str] = Field("", description="Personal Access Token (dapi...) or OAuth Bearer token")
+    catalog: str = Field("main", description="Unity Catalog Catalog Name (e.g. main, samples, hive_metastore)")
+    schema_name: str = Field("default", description="Schema / Database Name (e.g. default, tpch, curated)")
+    table_name: Optional[str] = Field(None, description="Table name to extract from")
+    query: Optional[str] = Field(None, description="Custom SQL Query (e.g. SELECT * FROM main.default.sales)")
+
 class LocalSourceConfig(BaseModel):
     dataset_id: Optional[str] = Field(None, description="Pre-seeded dataset identifier (e.g. ecommerce_orders, customer_360)")
     file_path: Optional[str] = None
@@ -109,6 +119,7 @@ class SourceConnectionRequest(BaseModel):
     azure_config: Optional[AzureLakehouseConfig] = None
     database_config: Optional[DatabaseSourceConfig] = None
     local_config: Optional[LocalSourceConfig] = None
+    databricks_config: Optional[DatabricksSourceConfig] = None
 
 # Schema & Profiling Models
 class ColumnProfile(BaseModel):
@@ -218,6 +229,8 @@ class DestinationTypeEnum(str, Enum):
     S3 = "s3"
     AZURE = "azure"
     AZURE_LAKEHOUSE = "azure_lakehouse"
+    DATABRICKS = "databricks"
+    DATABRICKS_CATALOG = "databricks_catalog"
 
 class DatabaseDestinationConfig(BaseModel):
     db_type: str = "mysql"  # 'mysql', 'postgresql', 'sqlserver'
@@ -257,11 +270,22 @@ class AzureDestinationConfig(BaseModel):
     connection_string: Optional[str] = None
     file_format: str = "csv"
 
+class DatabricksDestinationConfig(BaseModel):
+    server_hostname: str = Field("adb-123456789.azuredatabricks.net", description="Databricks Server Hostname")
+    http_path: str = Field("/sql/1.0/warehouses/a1b2c3d4e5f6", description="SQL Warehouse HTTP Path")
+    access_token: Optional[str] = Field("", description="Personal Access Token or OAuth Bearer Token")
+    catalog: str = Field("main", description="Target Unity Catalog catalog name")
+    schema_name: str = Field("default", description="Target schema name")
+    table_name: str = Field("curated_output", description="Target Delta table name")
+    write_mode: str = Field("append", description="'append', 'replace', or 'overwrite'")
+    create_table_if_not_exists: bool = True
+
 class ExportDestinationRequest(BaseModel):
     destination_type: DestinationTypeEnum = DestinationTypeEnum.LAKEHOUSE
     database_dest: Optional[DatabaseDestinationConfig] = None
     s3_dest: Optional[S3DestinationConfig] = None
     azure_dest: Optional[AzureDestinationConfig] = None
+    databricks_dest: Optional[DatabricksDestinationConfig] = None
 
 class PipelineExecutionRequest(BaseModel):
     name: str

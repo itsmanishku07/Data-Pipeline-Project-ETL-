@@ -173,7 +173,6 @@ export const SchemaEditorView = ({
                           type="text"
                           value={currentRule.format || ''}
                           onChange={(e) => handleFormatChange(col.name, e.target.value)}
-                          placeholder="yyyy-MM-dd HH:mm:ss"
                           className="px-2 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono w-40 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                         />
                       ) : (

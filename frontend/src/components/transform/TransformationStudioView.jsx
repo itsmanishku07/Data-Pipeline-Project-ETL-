@@ -906,7 +906,6 @@ export const TransformationStudioView = ({
               <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Filter datasets or flows..."
                 value={searchStage}
                 onChange={(e) => setSearchStage(e.target.value)}
                 className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-full sm:w-52 font-sans"
@@ -1253,7 +1252,6 @@ export const TransformationStudioView = ({
                         <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          placeholder="Search operations..."
                           value={opSearchTerm}
                           onChange={(e) => setOpSearchTerm(e.target.value)}
                           onClick={(e) => e.stopPropagation()}
@@ -1387,7 +1385,6 @@ export const TransformationStudioView = ({
                         <Search className="w-3 h-3 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          placeholder="Filter columns..."
                           value={colSearchTerm}
                           onChange={(e) => setColSearchTerm(e.target.value)}
                           className="w-full pl-7 pr-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -1457,7 +1454,6 @@ export const TransformationStudioView = ({
                       type="text"
                       value={params.condition || ''}
                       onChange={(e) => setParams({ ...params, condition: e.target.value })}
-                      placeholder="amount > 100 AND status = 'COMPLETED'"
                       className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     />
                     <div className="flex items-center space-x-1 overflow-x-auto py-0.5 custom-scrollbar text-[10px] text-zinc-500">
@@ -1598,7 +1594,6 @@ export const TransformationStudioView = ({
                         type="text"
                         value={params.suffix_right || '_joined'}
                         onChange={(e) => setParams({ ...params, suffix_right: e.target.value })}
-                        placeholder="_joined"
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                       />
                     </div>
@@ -1617,7 +1612,6 @@ export const TransformationStudioView = ({
                           type="text"
                           value={params.column_name || ''}
                           onChange={(e) => setParams({ ...params, column_name: e.target.value })}
-                          placeholder="total_revenue"
                           className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                         />
                       </div>
@@ -1627,7 +1621,6 @@ export const TransformationStudioView = ({
                           type="text"
                           value={params.expression || ''}
                           onChange={(e) => setParams({ ...params, expression: e.target.value })}
-                          placeholder="unit_price * quantity"
                           className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                         />
                       </div>
@@ -1711,7 +1704,6 @@ export const TransformationStudioView = ({
                         type="text"
                         value={params.new_name || ''}
                         onChange={(e) => setParams({ ...params, new_name: e.target.value })}
-                        placeholder="renamed_column"
                         className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                       />
                     </div>
@@ -1958,7 +1950,6 @@ export const TransformationStudioView = ({
                           type="text"
                           value={targetCol}
                           onChange={(e) => setParams({ ...params, target_column: e.target.value })}
-                          placeholder="row_num"
                           className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                         />
                       </div>
@@ -2082,7 +2073,6 @@ export const TransformationStudioView = ({
                     rows={2}
                     value={params.query || ''}
                     onChange={(e) => setParams({ ...params, query: e.target.value })}
-                    placeholder="SELECT *, (amount * 1.05) as amount_with_tax FROM df"
                     className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                   />
                 </div>
@@ -2429,7 +2419,6 @@ export const TransformationStudioView = ({
                         <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          placeholder="Search column statistics..."
                           value={statsSearchTerm}
                           onChange={(e) => setStatsSearchTerm(e.target.value)}
                           className="w-full pl-8 pr-3 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"

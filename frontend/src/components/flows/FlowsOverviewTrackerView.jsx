@@ -247,7 +247,6 @@ export const FlowsOverviewTrackerView = ({
           <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-400" />
           <input
             type="text"
-            placeholder="Filter flows by name, category, or description..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-shadow"
@@ -525,7 +524,6 @@ export const FlowsOverviewTrackerView = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sales Revenue Pipeline"
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
                   className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -552,7 +550,6 @@ export const FlowsOverviewTrackerView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
                 <textarea
                   rows={2}
-                  placeholder="Optional flow notes or purpose..."
                   value={newFlowDesc}
                   onChange={(e) => setNewFlowDesc(e.target.value)}
                   className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"

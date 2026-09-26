@@ -60,7 +60,6 @@ export const CreateFlowModal = ({ isOpen, onClose, onFlowCreated }) => {
             <input
               type="text"
               required
-              placeholder="e.g. Sales Revenue Pipeline"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -91,7 +90,6 @@ export const CreateFlowModal = ({ isOpen, onClose, onFlowCreated }) => {
             </label>
             <textarea
               rows={2}
-              placeholder="Optional flow notes or documentation..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"

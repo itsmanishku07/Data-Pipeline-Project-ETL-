@@ -260,7 +260,6 @@ export const HistoryAuditView = () => {
             <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Filter audit logs..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-52 font-sans"
@@ -398,7 +397,6 @@ export const HistoryAuditView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="localhost or 127.0.0.1"
                   value={dbHost}
                   onChange={(e) => setDbHost(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -423,7 +421,6 @@ export const HistoryAuditView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="dataflow_metadata"
                   value={dbDatabase}
                   onChange={(e) => setDbDatabase(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -435,7 +432,6 @@ export const HistoryAuditView = () => {
                 <input
                   type="text"
                   required
-                  placeholder="root"
                   value={dbUser}
                   onChange={(e) => setDbUser(e.target.value)}
                   className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
@@ -447,7 +443,6 @@ export const HistoryAuditView = () => {
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
               <input
                 type="password"
-                placeholder="Enter MySQL Password"
                 value={dbPassword}
                 onChange={(e) => setDbPassword(e.target.value)}
                 className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
