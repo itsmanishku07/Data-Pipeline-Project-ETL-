@@ -34,7 +34,7 @@ class StagingService:
         dataset_id = f"stg_{uuid.uuid4().hex[:10]}"
         
         # 4. Save directly into MySQL database staging table (zero parquet disk files)
-        storage_path, storage_format, file_size = DataStoreEngine.save_staged_dataframe(dataset_id, df_staged)
+        storage_path, storage_format, file_size = DataStoreEngine.save_staged_dataframe(dataset_id, df_staged, flow_id=request.flow_id)
 
         # 5. Profile staged data schema
         column_profiles = profile_dataframe(df_staged)

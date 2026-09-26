@@ -168,19 +168,56 @@ export const TransformationStudioView = ({
   const [errorMsg, setErrorMsg] = useState(null);
   const [searchStage, setSearchStage] = useState('');
 
-  // Re-hydrate active dataset when datasets are loaded/updated from API
+  // Re-hydrate and sync active dataset when allDatasets are loaded/updated from API
   useEffect(() => {
-    if (activeDataset) return;
-    try {
-      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
-      if (savedId && Array.isArray(allDatasets) && allDatasets.length > 0) {
-        const match = allDatasets.find((d) => d.id === savedId);
-        if (match) {
-          setActiveDataset(match);
+    if (!Array.isArray(allDatasets)) return;
+
+    if (allDatasets.length === 0) {
+      if (activeDataset !== null) {
+        setActiveDataset(null);
+        setPreviewResult(null);
+        setErrorMsg(null);
+        try {
+          localStorage.removeItem('dataflow_transform_active_stage_id');
+        } catch {}
+      }
+      return;
+    }
+
+    // If activeDataset is set, check if its ID still exists in the latest dataset list
+    if (activeDataset) {
+      const liveMatch = allDatasets.find((d) => d.id === activeDataset.id);
+      if (liveMatch) {
+        if (liveMatch !== activeDataset) {
+          setActiveDataset(liveMatch);
+        }
+      } else {
+        // Active dataset is stale (e.g. backend restarted or stage deleted)
+        const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
+        const fallbackMatch = allDatasets.find((d) => d.id === savedId) || allDatasets[0];
+        setActiveDataset(fallbackMatch || null);
+        setPreviewResult(null);
+        setErrorMsg(null);
+        if (fallbackMatch?.id) {
+          try {
+            localStorage.setItem('dataflow_transform_active_stage_id', fallbackMatch.id);
+          } catch {}
         }
       }
+      return;
+    }
+
+    // If activeDataset is not set yet, pick from savedId or initialDatasetId or first available
+    try {
+      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
+      const match = allDatasets.find((d) => d.id === savedId) || (initialDatasetId ? allDatasets.find((d) => d.id === initialDatasetId) : null);
+      if (match) {
+        setActiveDataset(match);
+      } else if (allDatasets.length > 0) {
+        setActiveDataset(allDatasets[0]);
+      }
     } catch {}
-  }, [allDatasets, initialDatasetId]);
+  }, [allDatasets, initialDatasetId, activeDataset]);
 
   // Persist active dataset ID to localStorage
   useEffect(() => {
@@ -666,7 +703,18 @@ export const TransformationStudioView = ({
       const res = await DataFlowAPI.previewTransform(activeDataset.id, activeOnly);
       setPreviewResult(res);
     } catch (err) {
-      setErrorMsg(extractErrorMessage(err, 'Transformation preview failed'));
+      const detail = err?.response?.data?.detail || err?.message || '';
+      if (detail.includes('not found') || err?.response?.status === 404) {
+        setErrorMsg(`Staged dataset '${activeDataset.name}' (${activeDataset.id}) is not present in the active database. Please select an available stage from the stages list or stage your dataset in Schema Casting.`);
+        if (Array.isArray(allDatasets) && allDatasets.length > 0) {
+          const valid = allDatasets.find((d) => d.id !== activeDataset.id) || allDatasets[0];
+          if (valid) {
+            setActiveDataset(valid);
+          }
+        }
+      } else {
+        setErrorMsg(extractErrorMessage(err, 'Transformation preview failed'));
+      }
     } finally {
       setPreviewLoading(false);
     }
