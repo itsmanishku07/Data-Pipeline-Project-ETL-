@@ -32,7 +32,7 @@ export const SchemaEditorView = ({
       initialRules[col.name] = {
         column_name: col.name,
         target_spark_type: col.spark_type,
-        format: col.spark_type === 'TimestampType' ? 'yyyy-MM-dd HH:mm:ss' : (col.spark_type === 'DateType' ? 'yyyy-MM-dd' : undefined),
+        format: '',
       };
     });
     setCastRules(initialRules);
@@ -44,7 +44,7 @@ export const SchemaEditorView = ({
       [columnName]: {
         ...prev[columnName],
         target_spark_type: newType,
-        format: newType === 'TimestampType' ? 'yyyy-MM-dd HH:mm:ss' : (newType === 'DateType' ? 'yyyy-MM-dd' : undefined),
+        format: prev[columnName]?.format || '',
       },
     }));
   };
@@ -141,11 +141,19 @@ export const SchemaEditorView = ({
                   column_name: col.name,
                   target_spark_type: col.spark_type,
                 };
+                const isAuditCol = col.name === 'aud_last_update';
                 const isModified = currentRule.target_spark_type !== col.spark_type;
 
                 return (
-                  <tr key={idx} className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30 transition-colors">
-                    <td className="py-2 px-3 font-medium text-zinc-900 dark:text-zinc-100">{col.name}</td>
+                  <tr key={idx} className={`transition-colors ${isAuditCol ? 'bg-amber-50/30 dark:bg-amber-950/10' : 'hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30'}`}>
+                    <td className="py-2 px-3 font-medium text-zinc-900 dark:text-zinc-100 flex items-center space-x-1.5">
+                      <span>{col.name}</span>
+                      {isAuditCol && (
+                        <span className="text-[9px] font-mono font-medium px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                          Audit Stamp
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-xs">{col.spark_type}</td>
                     <td className="py-2 px-3">
                       <select
@@ -171,9 +179,10 @@ export const SchemaEditorView = ({
                       {currentRule.target_spark_type === 'TimestampType' || currentRule.target_spark_type === 'DateType' ? (
                         <input
                           type="text"
+                          placeholder="Auto (ISO 8601)"
                           value={currentRule.format || ''}
                           onChange={(e) => handleFormatChange(col.name, e.target.value)}
-                          className="px-2 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono w-40 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                          className="px-2 py-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 font-mono w-40 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 placeholder:text-zinc-400"
                         />
                       ) : (
                         <span className="text-zinc-400 text-xs">-</span>

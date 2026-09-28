@@ -4,9 +4,13 @@ import pandas as pd
 import numpy as np
 from ..models.schemas import ColumnProfile, CastColumnRule, SparkDataTypeEnum
 
-def map_python_pandas_type_to_spark(dtype: str, sample_series: pd.Series) -> Tuple[str, str]:
+def map_python_pandas_type_to_spark(dtype: str, sample_series: pd.Series, col_name: str = "") -> Tuple[str, str]:
     dtype_str = str(dtype).lower()
+    col_name_lower = str(col_name).lower()
     
+    if col_name_lower == "aud_last_update" or col_name_lower.endswith("_at") or col_name_lower.endswith("_timestamp"):
+        return "TimestampType", "Audit Timestamp"
+
     if "int64" in dtype_str or "int32" in dtype_str:
         # Check if numbers are within 32-bit integer range
         non_nulls = sample_series.dropna()
@@ -81,7 +85,7 @@ def profile_dataframe(df: pd.DataFrame) -> List[ColumnProfile]:
             except Exception:
                 pass
 
-        spark_type, inferred_type = map_python_pandas_type_to_spark(series.dtype, series)
+        spark_type, inferred_type = map_python_pandas_type_to_spark(series.dtype, series, col_name=str(col_name))
 
         profiles.append(ColumnProfile(
             name=str(col_name),
@@ -142,22 +146,30 @@ def apply_type_casting(df: pd.DataFrame, cast_rules: List[CastColumnRule]) -> Tu
                     return None
                 df_out[col] = df_out[col].apply(to_bool).astype("boolean")
             elif "Date" in target_type:
-                if rule.format:
-                    # Convert spark date format (yyyy-MM-dd) to python (%Y-%m-%d)
-                    fmt = rule.format.replace("yyyy", "%Y").replace("MM", "%m").replace("dd", "%d")
-                    df_out[col] = pd.to_datetime(df_out[col], format=fmt, errors="coerce").dt.date
+                if rule.format and rule.format.strip():
+                    fmt = (rule.format.strip()
+                           .replace("yyyy", "%Y")
+                           .replace("MM", "%m")
+                           .replace("dd", "%d"))
+                    parsed = pd.to_datetime(df_out[col], format=fmt, errors="coerce")
+                    if not df_out[col].dropna().empty and parsed.dropna().empty:
+                        parsed = pd.to_datetime(df_out[col], errors="coerce")
+                    df_out[col] = parsed.dt.date
                 else:
                     df_out[col] = pd.to_datetime(df_out[col], errors="coerce").dt.date
             elif "Timestamp" in target_type:
-                if rule.format:
-                    fmt = (rule.format
+                if rule.format and rule.format.strip():
+                    fmt = (rule.format.strip()
                            .replace("yyyy", "%Y")
                            .replace("MM", "%m")
                            .replace("dd", "%d")
                            .replace("HH", "%H")
                            .replace("mm", "%M")
                            .replace("ss", "%S"))
-                    df_out[col] = pd.to_datetime(df_out[col], format=fmt, errors="coerce")
+                    parsed = pd.to_datetime(df_out[col], format=fmt, errors="coerce")
+                    if not df_out[col].dropna().empty and parsed.dropna().empty:
+                        parsed = pd.to_datetime(df_out[col], errors="coerce")
+                    df_out[col] = parsed
                 else:
                     df_out[col] = pd.to_datetime(df_out[col], errors="coerce")
             elif "String" in target_type:
@@ -170,5 +182,13 @@ def apply_type_casting(df: pd.DataFrame, cast_rules: List[CastColumnRule]) -> Tu
             logs.append(f"Successfully cast column '{col}' to {target_type}.")
         except Exception as e:
             logs.append(f"Error casting column '{col}' to {target_type}: {str(e)}")
+
+    # Guarantee aud_last_update is always present with valid UTC timestamps
+    if "aud_last_update" in df_out.columns:
+        from datetime import datetime
+        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        df_out["aud_last_update"] = df_out["aud_last_update"].fillna(now_iso)
+        # If any string 'NaT' or 'null' is present
+        df_out["aud_last_update"] = df_out["aud_last_update"].replace({"NaT": now_iso, "nan": now_iso, "<NA>": now_iso})
             
     return df_out, logs

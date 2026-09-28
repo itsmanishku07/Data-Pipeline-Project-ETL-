@@ -1,15 +1,16 @@
 import React from 'react';
-import { ChevronRight, GitBranch, Menu, PanelLeft, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
+import { ChevronRight, GitBranch, Menu, PanelLeftOpen, Clock, Settings, Globe } from 'lucide-react';
+import { useTimezone } from '../../context/TimezoneContext';
 
 const sectionTitles = {
   0: { title: 'Data Flows Lifecycle Tracker', subtitle: 'Live stage progression monitoring across Ingestion, Schema, Staging, Transform & Execution' },
-  1: { title: 'Data Source Ingestion', subtitle: 'Connect to PostgreSQL, MySQL, SQL Server, S3, or Azure Lakehouse' },
+  1: { title: 'Data Source Ingestion', subtitle: 'Connect to PostgreSQL, MySQL, SQL Server, S3, Azure Lakehouse, or Databricks Unity Catalog' },
   2: { title: 'Schema Definition & Type Casting', subtitle: 'Inspect inferred DataFrame columns and customize Apache Spark data types' },
-  3: { title: 'Lakehouse Staging Repository', subtitle: 'Browse flows and preview staged datasets stored in MySQL staging layer' },
+  3: { title: 'Lakehouse Staging Repository', subtitle: 'Browse flows and preview staged datasets stored in unified staging layer' },
   4: { title: 'Transformation Rule Studio', subtitle: 'Chain PySpark filters, math formulas, string operations, and Spark SQL' },
   5: { title: 'Pipeline DAG Execution', subtitle: 'Compile and run the end-to-end transformation job and export golden files' },
-  6: { title: 'MySQL Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
-  7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Azure Lakehouse, Database, or Cloud Storage' },
+  6: { title: 'Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
+  7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Cloud Storage or Lakehouse' },
 };
 
 export const TopHeader = ({ 
@@ -20,12 +21,14 @@ export const TopHeader = ({
   activeDatasetName,
   onOpenMobileMenu,
   isSidebarHidden = false,
-  onToggleSidebar
+  onToggleSidebar,
+  onOpenSettings
 }) => {
   const info = sectionTitles[currentStep] || sectionTitles[1];
+  const { currentTime, formatTime, timezoneShort, effectiveTimezone } = useTimezone();
 
   return (
-    <header className="h-14 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 sm:px-8 flex items-center justify-between gap-4 sticky top-0 z-30 transition-colors shrink-0">
+    <header className="h-14 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-6 md:px-8 flex items-center justify-between gap-3 sticky top-0 z-30 transition-colors shrink-0">
       <div className="flex items-center space-x-3 min-w-0 flex-1">
         {/* Mobile Hamburger Button */}
         <button
@@ -71,7 +74,7 @@ export const TopHeader = ({
             <select
               value={activeFlowId || 'all'}
               onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
-              className="bg-transparent text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer max-w-[120px] sm:max-w-[180px] truncate"
+              className="bg-transparent text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer max-w-[110px] sm:max-w-[160px] truncate"
             >
               <option value="all" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
                 All Flows ({flows.length})
@@ -87,12 +90,38 @@ export const TopHeader = ({
 
         {/* Active Dataset Badge */}
         {activeDatasetName && currentStep >= 3 && currentStep <= 5 && (
-          <div className="hidden sm:flex items-center space-x-1.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2.5 py-1 rounded-md text-xs font-mono">
+          <div className="hidden lg:flex items-center space-x-1.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2.5 py-1 rounded-md text-xs font-mono">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             <span className="text-zinc-500 dark:text-zinc-400">Dataset:</span>
-            <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate max-w-[140px]">{activeDatasetName}</span>
+            <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate max-w-[120px]">{activeDatasetName}</span>
           </div>
         )}
+
+        {/* LIVE TIMEZONE CLOCK PILL */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="flex items-center space-x-1.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs transition-colors group cursor-pointer"
+          title={`Active Timezone: ${effectiveTimezone}. Click to configure preferences.`}
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="font-mono text-xs font-medium text-zinc-800 dark:text-zinc-200">
+            {formatTime(currentTime)}
+          </span>
+          <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold group-hover:bg-zinc-300 dark:group-hover:bg-zinc-700 transition-colors">
+            {timezoneShort}
+          </span>
+        </button>
+
+        {/* SETTINGS GEAR BUTTON */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="p-1.5 rounded-md bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 transition-colors shadow-xs"
+          title="Studio Settings (Timezone, Clock, Appearance)"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
       </div>
     </header>
   );

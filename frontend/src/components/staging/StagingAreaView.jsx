@@ -22,6 +22,7 @@ import {
 import { DataFlowAPI } from '../../services/api';
 import { DataGrid } from '../common/DataGrid';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { useTimezone } from '../../context/TimezoneContext';
 
 export const StagingAreaView = ({
   initialDatasetId,
@@ -32,6 +33,7 @@ export const StagingAreaView = ({
   onSelectDatasetForTransform,
   onAddNewSource,
 }) => {
+  const { formatDateTime } = useTimezone();
   const [datasets, setDatasets] = useState(allDatasets || []);
   const [activeDataset, setActiveDataset] = useState(null);
   const [selectedFlowFilter, setSelectedFlowFilter] = useState('all');
@@ -533,7 +535,7 @@ export const StagingAreaView = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Created:</span>
-                <span className="text-zinc-800 dark:text-zinc-200">{new Date(activeDataset.created_at).toLocaleString()}</span>
+                <span className="text-zinc-800 dark:text-zinc-200">{formatDateTime(activeDataset.created_at, true)}</span>
               </div>
             </div>
 

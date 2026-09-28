@@ -106,7 +106,12 @@ class DatabaseConnector(BaseConnector):
             print(f"[WARN] Failed to fetch tables from {self.config.db_type}: {e}")
             return []
 
-    def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
+    def extract_data(
+        self, 
+        limit: Optional[int] = None,
+        watermark_col: Optional[str] = None,
+        last_watermark: Optional[str] = None
+    ) -> pd.DataFrame:
         try:
             engine = create_engine(
                 self._get_connection_url(),
@@ -120,10 +125,20 @@ class DatabaseConnector(BaseConnector):
             else:
                 raise ValueError("No table_name or query specified for database extraction.")
 
+            # Incremental High Watermark Filter
+            if watermark_col and last_watermark:
+                clean_wm = str(last_watermark).replace("'", "''")
+                if "WHERE" in sql.upper():
+                    sql = f"{sql} AND {watermark_col} > '{clean_wm}'"
+                else:
+                    sql = f"{sql} WHERE {watermark_col} > '{clean_wm}'"
+
             if limit and "LIMIT" not in sql.upper() and "TOP" not in sql.upper():
                 sql = f"{sql} LIMIT {limit}"
 
             df = pd.read_sql(sql, con=engine)
+            # Automatically stamp standard aud_last_update audit column
+            df = self.append_audit_timestamp(df)
             return df
         except Exception as e:
             raise RuntimeError(f"Database Query Error on {self.config.db_type.value}: {str(e)}")

@@ -72,6 +72,29 @@ export const DataFlowAPI = {
     });
   },
 
+  updateFlow: async (id, req) => {
+    const res = await api.put(`/flows/${id}`, req);
+    invalidateDataFlowCache('flows');
+    invalidateDataFlowCache(`flow_${id}`);
+    return res.data;
+  },
+
+  syncFlow: async (flowId, forceFull = false) => {
+    const res = await api.post(`/flows/${flowId}/sync?force_full=${forceFull}`);
+    invalidateDataFlowCache('flows');
+    invalidateDataFlowCache(`flow_${flowId}`);
+    invalidateDataFlowCache('staged_');
+    return res.data;
+  },
+
+  resetFlowWatermark: async (flowId, watermarkValue = null) => {
+    const url = watermarkValue ? `/flows/${flowId}/reset-watermark?watermark_value=${encodeURIComponent(watermarkValue)}` : `/flows/${flowId}/reset-watermark`;
+    const res = await api.post(url);
+    invalidateDataFlowCache('flows');
+    invalidateDataFlowCache(`flow_${flowId}`);
+    return res.data;
+  },
+
   deleteFlow: async (id) => {
     const res = await api.delete(`/flows/${id}`);
     invalidateDataFlowCache('flows');

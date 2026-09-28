@@ -30,7 +30,12 @@ class S3Connector(BaseConnector):
         # Test / Simulation Mode for local development
         return True, f"AWS S3 Connector initialized for bucket 's3://{self.config.bucket}/{self.config.key_prefix}' (Ready for extraction)"
 
-    def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
+    def extract_data(
+        self, 
+        limit: Optional[int] = None,
+        watermark_col: Optional[str] = None,
+        last_watermark: Optional[str] = None
+    ) -> pd.DataFrame:
         if self.config.access_key and self.config.secret_key:
             try:
                 import boto3
@@ -48,66 +53,78 @@ class S3Connector(BaseConnector):
                 p = (self.config.key_prefix or "").lower()
                 pref = str(fmt.value if hasattr(fmt, "value") else (fmt or "")).lower()
 
+                df = None
                 # 1. Quick Magic bytes check for Parquet
                 is_parquet_magic = body.startswith(b"PAR1") or (len(body) >= 4 and body[-4:] == b"PAR1")
                 if is_parquet_magic:
                     try:
                         df = pd.read_parquet(io.BytesIO(body))
-                        return df.head(limit) if limit and len(df) > limit else df
                     except Exception:
                         pass
 
                 # 2. Try preferred format first
-                if pref == "parquet" or p.endswith(".parquet"):
+                if df is None and (pref == "parquet" or p.endswith(".parquet")):
                     try:
                         df = pd.read_parquet(io.BytesIO(body))
-                        return df.head(limit) if limit and len(df) > limit else df
                     except Exception:
                         pass
 
-                if pref == "json" or p.endswith(".json"):
+                if df is None and (pref == "json" or p.endswith(".json")):
                     try:
                         df = pd.read_json(io.BytesIO(body))
-                        return df.head(limit) if limit and len(df) > limit else df
                     except Exception:
                         try:
                             df = pd.read_json(io.BytesIO(body), lines=True)
-                            return df.head(limit) if limit and len(df) > limit else df
                         except Exception:
                             pass
 
-                if pref == "csv" or p.endswith(".csv") or p.endswith(".tsv") or p.endswith(".txt"):
+                if df is None and (pref == "csv" or p.endswith(".csv") or p.endswith(".tsv") or p.endswith(".txt")):
                     for sep in [self.config.delimiter, ",", None, "\t", ";", "|"]:
                         try:
                             df = pd.read_csv(io.BytesIO(body), sep=sep, nrows=limit)
                             if len(df.columns) > 0 and len(df) >= 0:
-                                return df
+                                break
                         except Exception:
                             pass
 
                 # 3. Universal Fallback Cascade across all common formats
-                for enc in ["utf-8", "latin1", "cp1252", "utf-16"]:
-                    for sep in [",", None, "\t", ";", "|"]:
-                        try:
-                            df = pd.read_csv(io.BytesIO(body), sep=sep, encoding=enc, nrows=limit, on_bad_lines="skip")
-                            if len(df.columns) > 0 and len(df) >= 0:
-                                return df
-                        except Exception:
-                            pass
+                if df is None:
+                    for enc in ["utf-8", "latin1", "cp1252", "utf-16"]:
+                        for sep in [",", None, "\t", ";", "|"]:
+                            try:
+                                df = pd.read_csv(io.BytesIO(body), sep=sep, encoding=enc, nrows=limit, on_bad_lines="skip")
+                                if len(df.columns) > 0 and len(df) >= 0:
+                                    break
+                            except Exception:
+                                pass
+                        if df is not None:
+                            break
 
-                try:
-                    df = pd.read_json(io.BytesIO(body))
-                    return df.head(limit) if limit and len(df) > limit else df
-                except Exception:
-                    pass
+                if df is None:
+                    try:
+                        df = pd.read_json(io.BytesIO(body))
+                    except Exception:
+                        pass
 
-                try:
-                    df = pd.read_parquet(io.BytesIO(body))
-                    return df.head(limit) if limit and len(df) > limit else df
-                except Exception:
-                    pass
+                if df is None:
+                    try:
+                        df = pd.read_parquet(io.BytesIO(body))
+                    except Exception:
+                        pass
 
-                raise RuntimeError(f"Could not parse format of S3 object '{self.config.key_prefix}'.")
+                if df is None:
+                    raise RuntimeError(f"Could not parse format of S3 object '{self.config.key_prefix}'.")
+
+                # Apply watermark filter if requested
+                if watermark_col and last_watermark and watermark_col in df.columns:
+                    df = df[df[watermark_col].astype(str) > str(last_watermark)]
+
+                if limit and len(df) > limit:
+                    df = df.head(limit)
+
+                # Stamp enterprise aud_last_update
+                df = self.append_audit_timestamp(df)
+                return df
             except Exception as e:
                 raise RuntimeError(f"Error fetching from S3 bucket '{self.config.bucket}': {str(e)}")
 

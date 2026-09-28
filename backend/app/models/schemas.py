@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
+import pandas as pd
 
 class SourceType(str, Enum):
     S3 = "s3"
@@ -38,19 +39,56 @@ class SparkDataTypeEnum(str, Enum):
     BINARY = "BinaryType"
 
 # Flow Management Models
+class SyncMode(str, Enum):
+    FULL = "full"
+    INCREMENTAL_APPEND = "incremental_append"
+    INCREMENTAL_MERGE = "incremental_merge"
+
 class DataFlow(BaseModel):
     id: str
     name: str
     description: Optional[str] = ""
     category: Optional[str] = "General"
     status: Optional[str] = "active"
+    sync_mode: Optional[str] = "full"
+    watermark_column: Optional[str] = "aud_last_update"
+    last_watermark_value: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    primary_key: Optional[str] = None
+    source_request: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
+
+    @field_validator('last_watermark_value', mode='before')
+    @classmethod
+    def sanitize_watermark(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if pd.isna(v):
+            return None
+        s = str(v).strip()
+        if s.lower() in ("nat", "nan", "none", "<na>", "null", ""):
+            return None
+        return s
 
 class CreateFlowRequest(BaseModel):
     name: str
     description: Optional[str] = ""
     category: Optional[str] = "General"
+    sync_mode: Optional[str] = "full"
+    watermark_column: Optional[str] = "aud_last_update"
+    primary_key: Optional[str] = None
+    source_request: Optional[Dict[str, Any]] = None
+
+class UpdateFlowRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    status: Optional[str] = None
+    sync_mode: Optional[str] = None
+    watermark_column: Optional[str] = None
+    primary_key: Optional[str] = None
+    source_request: Optional[Dict[str, Any]] = None
 
 class FlowSummary(BaseModel):
     id: str
@@ -58,10 +96,27 @@ class FlowSummary(BaseModel):
     description: str
     category: str
     status: str
+    sync_mode: Optional[str] = "full"
+    watermark_column: Optional[str] = "aud_last_update"
+    last_watermark_value: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    primary_key: Optional[str] = None
     dataset_count: int = 0
     total_rows: int = 0
     created_at: datetime
     stages: List[Dict[str, Any]] = []
+
+    @field_validator('last_watermark_value', mode='before')
+    @classmethod
+    def sanitize_watermark(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if pd.isna(v):
+            return None
+        s = str(v).strip()
+        if s.lower() in ("nat", "nan", "none", "<na>", "null", ""):
+            return None
+        return s
 
 # Source Configurations
 class S3SourceConfig(BaseModel):
@@ -97,10 +152,10 @@ class DatabaseSourceConfig(BaseModel):
 
 class DatabricksSourceConfig(BaseModel):
     server_hostname: str = Field(..., description="Databricks Server Hostname (e.g. adb-xxxx.azuredatabricks.net or dbc-xxxx.cloud.databricks.com)")
-    http_path: str = Field(..., description="SQL Warehouse HTTP Path (e.g. /sql/1.0/warehouses/xxxx)")
+    http_path: Optional[str] = Field("", description="SQL Warehouse HTTP Path (e.g. /sql/1.0/warehouses/xxxx)")
     access_token: Optional[str] = Field("", description="Personal Access Token (dapi...) or OAuth Bearer token")
-    catalog: str = Field("main", description="Unity Catalog Catalog Name (e.g. main, samples, hive_metastore)")
-    schema_name: str = Field("default", description="Schema / Database Name (e.g. default, tpch, curated)")
+    catalog: Optional[str] = Field("main", description="Unity Catalog Catalog Name (e.g. main, samples, hive_metastore)")
+    schema_name: Optional[str] = Field("default", description="Schema / Database Name (e.g. default, tpch, curated)")
     table_name: Optional[str] = Field(None, description="Table name to extract from")
     query: Optional[str] = Field(None, description="Custom SQL Query (e.g. SELECT * FROM main.default.sales)")
 
@@ -155,6 +210,9 @@ class StageDatasetRequest(BaseModel):
     description: Optional[str] = ""
     flow_id: Optional[str] = None
     cast_rules: List[CastColumnRule] = []
+    sync_mode: Optional[str] = "full"
+    watermark_column: Optional[str] = "aud_last_update"
+    primary_key: Optional[str] = None
 
 # Staging Metadata & Preview
 class StagedDatasetInfo(BaseModel):
@@ -164,6 +222,11 @@ class StagedDatasetInfo(BaseModel):
     flow_id: Optional[str] = None
     source_type: Union[SourceType, str]
     source_summary: str
+    sync_mode: Optional[str] = "full"
+    watermark_column: Optional[str] = "aud_last_update"
+    last_watermark_value: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    primary_key: Optional[str] = None
     row_count: int
     column_count: int
     storage_path: str
@@ -171,6 +234,18 @@ class StagedDatasetInfo(BaseModel):
     created_at: datetime
     columns: List[ColumnProfile]
     file_size_bytes: int = 0
+
+    @field_validator('last_watermark_value', mode='before')
+    @classmethod
+    def sanitize_watermark(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if pd.isna(v):
+            return None
+        s = str(v).strip()
+        if s.lower() in ("nat", "nan", "none", "<na>", "null", ""):
+            return None
+        return s
 
 class StagedDataPreview(BaseModel):
     dataset_id: str

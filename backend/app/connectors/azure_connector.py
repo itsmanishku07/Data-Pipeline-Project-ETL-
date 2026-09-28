@@ -140,9 +140,15 @@ class AzureLakehouseConnector(BaseConnector):
         except Exception as e:
             raise RuntimeError(self._format_azure_error(e, self.config.account_name, container_name))
 
-    def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
+    def extract_data(
+        self, 
+        limit: Optional[int] = None,
+        watermark_col: Optional[str] = None,
+        last_watermark: Optional[str] = None
+    ) -> pd.DataFrame:
         """
         Downloads and parses the actual data file from Azure Blob / ADLS Gen2.
+        Supports high-watermark filtering and aud_last_update stamping.
         """
         client = self._get_blob_service_client()
         container_name = (self.config.container_name or "").strip()
@@ -185,8 +191,15 @@ class AzureLakehouseConnector(BaseConnector):
                 except Exception:
                     df = pd.read_csv(io.BytesIO(content), nrows=limit)
 
+            # Apply incremental watermark filter in memory if specified
+            if watermark_col and last_watermark and watermark_col in df.columns:
+                df = df[df[watermark_col].astype(str) > str(last_watermark)]
+
             if limit and len(df) > limit:
                 df = df.head(limit)
+
+            # Automatically stamp standard aud_last_update audit column
+            df = self.append_audit_timestamp(df)
             return df
         except Exception as e:
             raise RuntimeError(f"Error parsing downloaded Azure file '{blob_path}': {str(e)}")

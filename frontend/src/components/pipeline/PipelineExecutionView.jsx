@@ -34,9 +34,12 @@ import {
   Tag,
   Folder,
   FolderOpen,
-  FileText
+  FileText,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
+import { useTimezone } from '../../context/TimezoneContext';
 
 export const PipelineExecutionView = ({
   stagedDataset = null,
@@ -48,6 +51,7 @@ export const PipelineExecutionView = ({
   onViewStagedDataset,
   onRestartPipeline,
 }) => {
+  const { formatDateTime, formatDate, formatTime } = useTimezone();
   // Main View Mode: 'runner' (Configure & Run) | 'history' (Executed Pipelines Hub)
   const [viewMode, setViewMode] = useState('runner');
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
@@ -445,7 +449,7 @@ export const PipelineExecutionView = ({
                 <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{selectedJobDetails.name}</h3>
               </div>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
-                Job ID: {selectedJobDetails.id} • Executed: {new Date(selectedJobDetails.created_at).toLocaleString()}
+                Job ID: {selectedJobDetails.id} • Executed: {formatDateTime(selectedJobDetails.created_at, true)}
               </p>
             </div>
           </div>
@@ -501,7 +505,7 @@ export const PipelineExecutionView = ({
           <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
             <span className="text-[10px] text-zinc-400 uppercase">Completed</span>
             <p className="text-xs font-mono text-zinc-700 dark:text-zinc-300 mt-1">
-              {selectedJobDetails.completed_at ? new Date(selectedJobDetails.completed_at).toLocaleTimeString() : 'N/A'}
+              {selectedJobDetails.completed_at ? formatTime(selectedJobDetails.completed_at) : 'N/A'}
             </p>
           </div>
         </div>
@@ -621,7 +625,7 @@ export const PipelineExecutionView = ({
                     const isSelected = flow.id === selectedFlowId;
                     const flowRulesCount = Array.isArray(flow.rules) ? flow.rules.length : 0;
                     const creationDate = flow.created_at 
-                      ? new Date(flow.created_at).toLocaleDateString()
+                      ? formatDate(flow.created_at)
                       : 'Initial';
 
                     return (
@@ -825,7 +829,7 @@ export const PipelineExecutionView = ({
                 Select Destination Engine
               </label>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                 <button
                   type="button"
                   onClick={() => { setDestinationType('database'); setDestTestResult(null); }}
@@ -836,7 +840,20 @@ export const PipelineExecutionView = ({
                   }`}
                 >
                   <Database className="w-4 h-4" />
-                  <span className="text-xs">Database (MySQL / Postgres)</span>
+                  <span className="text-xs">Database (MySQL/PG)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setDestinationType('databricks'); setDestTestResult(null); }}
+                  className={`p-3 rounded-lg border text-center transition-colors flex flex-col items-center justify-center space-y-1 ${
+                    destinationType === 'databricks'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-xs font-medium'
+                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+                  <span className="text-xs font-medium">Databricks Catalog</span>
                 </button>
 
                 <button
@@ -874,7 +891,7 @@ export const PipelineExecutionView = ({
                       : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                   }`}
                 >
-                  <Cloud className="w-4 h-4" />
+                  <Layers className="w-4 h-4" />
                   <span className="text-xs">Azure ADLS Blob</span>
                 </button>
               </div>
@@ -983,6 +1000,150 @@ export const PipelineExecutionView = ({
                     >
                       <Zap className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin' : ''}`} />
                       <span>{testingDest ? 'Testing Destination...' : 'Test Destination Connection'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Databricks Unity Catalog Destination */}
+              {destinationType === 'databricks' && (
+                <div className="bg-zinc-50/50 dark:bg-zinc-950 p-4 rounded-md border border-zinc-200 dark:border-zinc-800 space-y-3.5">
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Databricks Unity Catalog Destination Configuration</span>
+                    </div>
+                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40">
+                      Delta Lake Format
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Server Hostname *
+                      </label>
+                      <input
+                        type="text"
+                        value={dbxHost}
+                        onChange={(e) => setDbxHost(e.target.value)}
+                        placeholder="adb-123456789.azuredatabricks.net"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        SQL Warehouse HTTP Path *
+                      </label>
+                      <input
+                        type="text"
+                        value={dbxHttpPath}
+                        onChange={(e) => setDbxHttpPath(e.target.value)}
+                        placeholder="/sql/1.0/warehouses/a1b2c3d4e5f6"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Personal Access Token with Show/Hide Toggle */}
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Personal Access Token (PAT) *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showDbxDestToken ? "text" : "password"}
+                        value={dbxToken}
+                        onChange={(e) => setDbxToken(e.target.value)}
+                        placeholder="dapi1234567890abcdef..."
+                        className="w-full pl-3 pr-10 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowDbxDestToken(!showDbxDestToken)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                      >
+                        {showDbxDestToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Catalog, Schema, Table Name, Write Mode Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Catalog *</label>
+                      <input
+                        type="text"
+                        value={dbxCatalog}
+                        onChange={(e) => setDbxCatalog(e.target.value)}
+                        placeholder="main"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Schema / DB *</label>
+                      <input
+                        type="text"
+                        value={dbxSchema}
+                        onChange={(e) => setDbxSchema(e.target.value)}
+                        placeholder="default"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Target Table Name *</label>
+                      <input
+                        type="text"
+                        value={dbxTable}
+                        onChange={(e) => setDbxTable(e.target.value)}
+                        placeholder="curated_output"
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Write Mode</label>
+                      <select
+                        value={dbxWriteMode}
+                        onChange={(e) => setDbxWriteMode(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100"
+                      >
+                        <option value="append">Append (Add rows to Delta table)</option>
+                        <option value="replace">Replace / Overwrite (Drop & recreate)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Target Delta URI Live Preview */}
+                  <div className="p-2.5 rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-700 dark:text-zinc-300 flex items-center space-x-2">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span className="truncate">
+                      Destination Target: <strong>`{dbxCatalog || 'main'}`.`{dbxSchema || 'default'}`.`{dbxTable || (outputDatasetName || 'curated_output')}`</strong>
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-zinc-200 dark:border-zinc-800">
+                    <label className="flex items-center space-x-2 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={createDbxTableIfNotExists}
+                        onChange={(e) => setCreateDbxTableIfNotExists(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Auto-create Delta table & schema if not exists</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleTestDestination}
+                      disabled={testingDest}
+                      className="px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+                    >
+                      <Zap className={`w-3.5 h-3.5 ${testingDest ? 'animate-spin' : ''}`} />
+                      <span>{testingDest ? 'Testing Databricks...' : 'Test Databricks Connection'}</span>
                     </button>
                   </div>
                 </div>
@@ -1346,7 +1507,7 @@ export const PipelineExecutionView = ({
                     </div>
 
                     <p className="text-[10px] font-mono text-zinc-400 mt-1">
-                      ID: {job.id} • {new Date(job.created_at).toLocaleTimeString()}
+                      ID: {job.id} • {formatTime(job.created_at)}
                     </p>
                   </div>
 
@@ -1413,7 +1574,7 @@ export const PipelineExecutionView = ({
                 <div>
                   <span className="text-[10px] text-zinc-400 block">CREATED</span>
                   <span className="font-medium text-zinc-800 dark:text-zinc-200 block">
-                    {viewingFlowDetails.created_at ? new Date(viewingFlowDetails.created_at).toLocaleDateString() : 'Initial'}
+                    {viewingFlowDetails.created_at ? formatDate(viewingFlowDetails.created_at) : 'Initial'}
                   </span>
                 </div>
                 <div>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useTimezone } from '../../context/TimezoneContext';
 
 export const DataGrid = ({
   columns = [],
@@ -14,6 +15,7 @@ export const DataGrid = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [localPage, setLocalPage] = useState(1);
+  const { formatDateTime } = useTimezone();
 
   const columnDefs = useMemo(() => {
     return columns.map((col) => {
@@ -110,6 +112,12 @@ export const DataGrid = ({
                     {columnDefs.map((col, cIdx) => {
                       const val = row[col.name];
                       const isNull = val === null || val === undefined;
+                      const isDateOrTimeCol = col.spark_type === 'TimestampType' || col.spark_type === 'DateType' || col.name === 'aud_last_update' || col.name?.toLowerCase().endsWith('_at') || col.name?.toLowerCase().endsWith('_date');
+                      let displayVal = isNull ? null : String(val);
+                      if (!isNull && isDateOrTimeCol && (typeof val === 'string' || typeof val === 'number') && String(val).match(/^\d{4}-\d{2}-\d{2}/)) {
+                        displayVal = formatDateTime(val, col.name === 'aud_last_update');
+                      }
+
                       return (
                         <td key={cIdx} className="py-2 px-3 text-zinc-800 dark:text-zinc-200 border-r border-zinc-100 dark:border-zinc-800/20 last:border-r-0 max-w-xs truncate">
                           {isNull ? (
@@ -121,7 +129,7 @@ export const DataGrid = ({
                               {val ? 'TRUE' : 'FALSE'}
                             </span>
                           ) : (
-                            String(val)
+                            displayVal
                           )}
                         </td>
                       );

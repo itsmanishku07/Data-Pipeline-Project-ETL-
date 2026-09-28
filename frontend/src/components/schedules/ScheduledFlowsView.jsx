@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { useTimezone } from '../../context/TimezoneContext';
 
 const CRON_PRESET_CATEGORIES = [
   {
@@ -79,6 +80,7 @@ const CRON_PRESETS = CRON_PRESET_CATEGORIES.flatMap((c) => c.items);
  * Modal to inspect execution history, failure diagnosis, and logs for a scheduled trigger.
  */
 export const ScheduleLogsModal = ({ schedule, isOpen, onClose, onRunNow, onEdit }) => {
+  const { formatDateTime, formatTime } = useTimezone();
   const [jobDetails, setJobDetails] = useState(null);
   const [loadingJob, setLoadingJob] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -178,7 +180,7 @@ export const ScheduleLogsModal = ({ schedule, isOpen, onClose, onRunNow, onEdit 
             <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200/80 dark:border-zinc-800">
               <span className="text-[10px] uppercase font-semibold text-zinc-400 block mb-1">Last Run Time</span>
               <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                {schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString() : 'Never'}
+                {schedule.last_run_at ? formatDateTime(schedule.last_run_at, true) : 'Never'}
               </span>
             </div>
             <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200/80 dark:border-zinc-800">
@@ -196,7 +198,7 @@ export const ScheduleLogsModal = ({ schedule, isOpen, onClose, onRunNow, onEdit 
             <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-200/80 dark:border-zinc-800">
               <span className="text-[10px] uppercase font-semibold text-zinc-400 block mb-1">Next Trigger</span>
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                {schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleTimeString() : 'Paused'}
+                {schedule.next_run_at ? formatTime(schedule.next_run_at) : 'Paused'}
               </span>
             </div>
           </div>
@@ -329,6 +331,7 @@ export const ScheduleLogsModal = ({ schedule, isOpen, onClose, onRunNow, onEdit 
 
 
 export const ScheduledFlowsView = ({ flows = [], allDatasets = [], activeFlowId, onSelectFlow }) => {
+  const { formatDateTime } = useTimezone();
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -740,7 +743,7 @@ export const ScheduledFlowsView = ({ flows = [], allDatasets = [], activeFlowId,
                         <span>Next Run:</span>
                       </span>
                       <span className="font-medium text-zinc-800 dark:text-zinc-200">
-                        {sched.next_run_at ? new Date(sched.next_run_at).toLocaleString() : isEnabled ? 'Pending next cycle' : 'Paused'}
+                        {sched.next_run_at ? formatDateTime(sched.next_run_at, true) : isEnabled ? 'Pending next cycle' : 'Paused'}
                       </span>
                     </div>
                   </div>

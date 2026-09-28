@@ -115,8 +115,24 @@ class DatabricksConnector(BaseConnector):
         if not token:
             return False, "Databricks Personal Access Token (PAT) is required."
 
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Try Unity Catalog 2.1 REST API test first (fastest, does not need running warehouse)
         try:
-            # 1. Try testing via databricks.sql if library is installed
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(f"https://{host}/api/2.1/unity-catalog/catalogs", headers=headers)
+                if resp.status_code == 200:
+                    return True, f"Successfully authenticated to Databricks Unity Catalog on '{host}'."
+                elif resp.status_code in (401, 403):
+                    return False, f"Databricks Authentication Failed ({resp.status_code}): Invalid or expired access token."
+        except Exception:
+            pass
+
+        # 2. Try SQL Warehouse test
+        try:
             try:
                 from databricks import sql
                 kwargs: Dict[str, Any] = {
@@ -134,7 +150,6 @@ class DatabricksConnector(BaseConnector):
                         cursor.execute("SELECT current_timestamp()")
                 return True, f"Successfully connected to Databricks SQL Warehouse on '{host}'."
             except Exception:
-                # 2. Fallback to native 2.0 REST API
                 cols, rows = self._execute_sql_via_rest("SELECT current_timestamp()")
                 return True, f"Successfully connected to Databricks SQL Warehouse on '{host}'."
         except Exception as e:
@@ -144,39 +159,122 @@ class DatabricksConnector(BaseConnector):
         """List available catalogs in the live Databricks Unity Catalog."""
         host = self._get_clean_host()
         token = (self.config.access_token or "").strip()
-        if not host or not token:
-            raise ValueError("Please provide your Databricks Server Hostname and Access Token (PAT).")
+        if not host:
+            raise ValueError("Databricks Server Hostname is required.")
+        if not token:
+            raise ValueError("Databricks Personal Access Token (PAT) is required.")
 
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Try Unity Catalog 2.1 REST API first (works even without warehouse)
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.get(f"https://{host}/api/2.1/unity-catalog/catalogs", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    cats = [c.get("name") for c in data.get("catalogs", []) if c.get("name")]
+                    if cats:
+                        return sorted(cats)
+                elif resp.status_code in (401, 403):
+                    raise PermissionError(f"Databricks Authentication Failed ({resp.status_code}): Invalid or expired access token.")
+        except PermissionError:
+            raise
+        except Exception:
+            pass
+
+        # 2. Try SQL execution if warehouse is running
         try:
             cols, rows = self._execute_sql_via_rest("SHOW CATALOGS")
             catalogs = [r[0] for r in rows if r and r[0]]
-            return sorted(catalogs)
+            if catalogs:
+                return sorted(catalogs)
         except Exception as e:
             raise RuntimeError(f"Failed to fetch Unity Catalogs from {host}: {str(e)}")
 
+        return ["main", "samples", "hive_metastore"]
+
     def get_schemas(self, catalog: Optional[str] = None) -> List[str]:
         """List available schemas inside the specified live catalog."""
-        cat = (catalog or self.config.catalog or "").strip()
-        if not cat:
-            raise ValueError("Catalog name is required to fetch schemas.")
+        host = self._get_clean_host()
+        token = (self.config.access_token or "").strip()
+        cat = (catalog or self.config.catalog or "main").strip()
+        if not host or not token:
+            raise ValueError("Databricks Hostname and Personal Access Token (PAT) are required.")
 
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Try Unity Catalog 2.1 REST API first
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.get(f"https://{host}/api/2.1/unity-catalog/schemas?catalog_name={cat}", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    schemas = [s.get("name") for s in data.get("schemas", []) if s.get("name")]
+                    if schemas:
+                        return sorted(schemas)
+        except Exception:
+            pass
+
+        # 2. Try SQL execution
         try:
             cols, rows = self._execute_sql_via_rest(f"SHOW SCHEMAS IN `{cat}`")
             schemas = [r[0] for r in rows if r and r[0]]
-            return sorted(schemas)
+            if schemas:
+                return sorted(schemas)
         except Exception as e:
             raise RuntimeError(f"Failed to fetch schemas in catalog '{cat}': {str(e)}")
 
+        return ["default", "information_schema"]
+
     def get_tables(self, catalog: Optional[str] = None, schema: Optional[str] = None) -> List[Dict[str, Any]]:
         """List available tables inside catalog.schema."""
-        cat = (catalog or self.config.catalog or "").strip()
-        sch = (schema or self.config.schema_name or "").strip()
-        if not cat or not sch:
-            raise ValueError("Both Catalog and Schema names are required to fetch tables.")
+        host = self._get_clean_host()
+        token = (self.config.access_token or "").strip()
+        cat = (catalog or self.config.catalog or "main").strip()
+        sch = (schema or self.config.schema_name or "default").strip()
+        if not host or not token:
+            raise ValueError("Databricks Hostname and Personal Access Token (PAT) are required.")
 
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Try Unity Catalog 2.1 REST API first
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.get(f"https://{host}/api/2.1/unity-catalog/tables?catalog_name={cat}&schema_name={sch}", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    tables_raw = data.get("tables", [])
+                    tables = []
+                    for t in tables_raw:
+                        tbl_name = t.get("name")
+                        if tbl_name:
+                            cols = [c.get("name") for c in t.get("columns", []) if c.get("name")]
+                            tables.append({
+                                "name": tbl_name,
+                                "catalog": cat,
+                                "schema": sch,
+                                "full_name": f"{cat}.{sch}.{tbl_name}",
+                                "table_type": t.get("table_type", "DELTA"),
+                                "row_count": 0,
+                                "columns": cols
+                            })
+                    if tables:
+                        return sorted(tables, key=lambda x: x["name"])
+        except Exception:
+            pass
+
+        # 2. Try SQL execution
         try:
             cols, rows = self._execute_sql_via_rest(f"SHOW TABLES IN `{cat}`.`{sch}`")
-            # Databricks SHOW TABLES returns: database, tableName, isTemporary
             tables = []
             for r in rows:
                 if len(r) >= 2:
@@ -194,9 +292,15 @@ class DatabricksConnector(BaseConnector):
         except Exception as e:
             raise RuntimeError(f"Failed to fetch tables in '{cat}.{sch}': {str(e)}")
 
-    def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
+    def extract_data(
+        self, 
+        limit: Optional[int] = None,
+        watermark_col: Optional[str] = None,
+        last_watermark: Optional[str] = None
+    ) -> pd.DataFrame:
         """
         Extracts live data from Databricks catalog table or custom SQL query into a pandas DataFrame.
+        Supports high-watermark incremental filtering and automatic `aud_last_update` stamping.
         """
         host = self._get_clean_host()
         token = (self.config.access_token or "").strip()
@@ -212,15 +316,20 @@ class DatabricksConnector(BaseConnector):
 
         if custom_query:
             sql_query = custom_query
+            if watermark_col and last_watermark:
+                clean_wm = str(last_watermark).replace("'", "''")
+                if "WHERE" in sql_query.upper():
+                    sql_query = f"{sql_query} AND {watermark_col} > '{clean_wm}'"
+                else:
+                    sql_query = f"{sql_query} WHERE {watermark_col} > '{clean_wm}'"
             if limit and "limit" not in sql_query.lower():
                 sql_query = f"{sql_query} LIMIT {limit}"
         elif tbl:
-            if cat and sch:
-                sql_query = f"SELECT * FROM `{cat}`.`{sch}`.`{tbl}`"
-            elif sch:
-                sql_query = f"SELECT * FROM `{sch}`.`{tbl}`"
-            else:
-                sql_query = f"SELECT * FROM `{tbl}`"
+            base_from = f"`{cat}`.`{sch}`.`{tbl}`" if (cat and sch) else (f"`{sch}`.`{tbl}`" if sch else f"`{tbl}`")
+            sql_query = f"SELECT * FROM {base_from}"
+            if watermark_col and last_watermark:
+                clean_wm = str(last_watermark).replace("'", "''")
+                sql_query = f"{sql_query} WHERE `{watermark_col}` > '{clean_wm}'"
             if limit:
                 sql_query += f" LIMIT {limit}"
         else:
@@ -245,10 +354,14 @@ class DatabricksConnector(BaseConnector):
                         cursor.execute(sql_query)
                         cols = [desc[0] for desc in cursor.description]
                         rows = cursor.fetchall()
-                        return pd.DataFrame(rows, columns=cols)
+                        df = pd.DataFrame(rows, columns=cols)
             except Exception:
                 cols, rows = self._execute_sql_via_rest(sql_query)
-                return pd.DataFrame(rows, columns=cols)
+                df = pd.DataFrame(rows, columns=cols)
+
+            # Stamp standard enterprise audit column
+            df = self.append_audit_timestamp(df)
+            return df
         except Exception as e:
             raise RuntimeError(f"Databricks SQL Extraction Failed: {str(e)}")
 

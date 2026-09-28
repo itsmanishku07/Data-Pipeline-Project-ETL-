@@ -57,16 +57,31 @@ def init_db():
         description TEXT,
         category TEXT DEFAULT 'General',
         status TEXT DEFAULT 'active',
+        sync_mode TEXT DEFAULT 'full',
+        watermark_column TEXT DEFAULT 'aud_last_update',
+        last_watermark_value TEXT,
+        last_synced_at TEXT,
+        primary_key TEXT,
+        source_request_json TEXT,
         rules_json TEXT DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT
     )
     """)
 
-    try:
-        cursor.execute("ALTER TABLE flows ADD COLUMN rules_json TEXT DEFAULT '[]'")
-    except Exception:
-        pass
+    for col_def in [
+        "rules_json TEXT DEFAULT '[]'",
+        "sync_mode TEXT DEFAULT 'full'",
+        "watermark_column TEXT DEFAULT 'aud_last_update'",
+        "last_watermark_value TEXT",
+        "last_synced_at TEXT",
+        "primary_key TEXT",
+        "source_request_json TEXT"
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE flows ADD COLUMN {col_def}")
+        except Exception:
+            pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS staged_datasets (
@@ -76,6 +91,11 @@ def init_db():
         description TEXT,
         source_type TEXT NOT NULL,
         source_summary TEXT,
+        sync_mode TEXT DEFAULT 'full',
+        watermark_column TEXT DEFAULT 'aud_last_update',
+        last_watermark_value TEXT,
+        last_synced_at TEXT,
+        primary_key TEXT,
         row_count INTEGER,
         column_count INTEGER,
         storage_path TEXT NOT NULL,
@@ -85,6 +105,18 @@ def init_db():
         file_size_bytes INTEGER DEFAULT 0
     )
     """)
+
+    for col_def in [
+        "sync_mode TEXT DEFAULT 'full'",
+        "watermark_column TEXT DEFAULT 'aud_last_update'",
+        "last_watermark_value TEXT",
+        "last_synced_at TEXT",
+        "primary_key TEXT"
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE staged_datasets ADD COLUMN {col_def}")
+        except Exception:
+            pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS pipeline_jobs (
@@ -219,16 +251,31 @@ def init_db():
                     description TEXT,
                     category VARCHAR(64) DEFAULT 'General',
                     status VARCHAR(32) DEFAULT 'active',
+                    sync_mode VARCHAR(32) DEFAULT 'full',
+                    watermark_column VARCHAR(128) DEFAULT 'aud_last_update',
+                    last_watermark_value VARCHAR(255) NULL,
+                    last_synced_at DATETIME NULL,
+                    primary_key VARCHAR(255) NULL,
+                    source_request_json JSON NULL,
                     rules_json JSON NULL,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NULL,
                     INDEX idx_flows_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
-                try:
-                    mconn.execute(text("ALTER TABLE dataflow_flows ADD COLUMN rules_json JSON NULL"))
-                except Exception:
-                    pass
+                for col_sql in [
+                    "ALTER TABLE dataflow_flows ADD COLUMN rules_json JSON NULL",
+                    "ALTER TABLE dataflow_flows ADD COLUMN sync_mode VARCHAR(32) DEFAULT 'full'",
+                    "ALTER TABLE dataflow_flows ADD COLUMN watermark_column VARCHAR(128) DEFAULT 'aud_last_update'",
+                    "ALTER TABLE dataflow_flows ADD COLUMN last_watermark_value VARCHAR(255) NULL",
+                    "ALTER TABLE dataflow_flows ADD COLUMN last_synced_at DATETIME NULL",
+                    "ALTER TABLE dataflow_flows ADD COLUMN primary_key VARCHAR(255) NULL",
+                    "ALTER TABLE dataflow_flows ADD COLUMN source_request_json JSON NULL"
+                ]:
+                    try:
+                        mconn.execute(text(col_sql))
+                    except Exception:
+                        pass
                 mconn.execute(text("""
                 CREATE TABLE IF NOT EXISTS dataflow_staged_datasets (
                     id VARCHAR(64) PRIMARY KEY,
@@ -237,6 +284,11 @@ def init_db():
                     description TEXT,
                     source_type VARCHAR(64) NOT NULL,
                     source_summary VARCHAR(255),
+                    sync_mode VARCHAR(32) DEFAULT 'full',
+                    watermark_column VARCHAR(128) DEFAULT 'aud_last_update',
+                    last_watermark_value VARCHAR(255) NULL,
+                    last_synced_at DATETIME NULL,
+                    primary_key VARCHAR(255) NULL,
                     row_count INT,
                     column_count INT,
                     storage_path TEXT NOT NULL,
@@ -248,6 +300,17 @@ def init_db():
                     INDEX idx_ds_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
+                for col_sql in [
+                    "ALTER TABLE dataflow_staged_datasets ADD COLUMN sync_mode VARCHAR(32) DEFAULT 'full'",
+                    "ALTER TABLE dataflow_staged_datasets ADD COLUMN watermark_column VARCHAR(128) DEFAULT 'aud_last_update'",
+                    "ALTER TABLE dataflow_staged_datasets ADD COLUMN last_watermark_value VARCHAR(255) NULL",
+                    "ALTER TABLE dataflow_staged_datasets ADD COLUMN last_synced_at DATETIME NULL",
+                    "ALTER TABLE dataflow_staged_datasets ADD COLUMN primary_key VARCHAR(255) NULL"
+                ]:
+                    try:
+                        mconn.execute(text(col_sql))
+                    except Exception:
+                        pass
                 mconn.execute(text("""
                 CREATE TABLE IF NOT EXISTS dataflow_staged_records (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -637,6 +700,13 @@ class CatalogDB:
         flow_id = flow_dict.get("id") or f"flow_{uuid.uuid4().hex[:8]}"
         now_str = datetime.utcnow().isoformat()
         rules_json_str = json.dumps(flow_dict.get("rules", []))
+        sync_mode = flow_dict.get("sync_mode") or "full"
+        watermark_column = flow_dict.get("watermark_column") or "aud_last_update"
+        last_watermark_value = flow_dict.get("last_watermark_value")
+        last_synced_at = flow_dict.get("last_synced_at")
+        primary_key = flow_dict.get("primary_key")
+        source_req = flow_dict.get("source_request")
+        source_req_str = json.dumps(source_req.dict() if hasattr(source_req, "dict") else source_req, default=str) if source_req else None
 
         # 1. MySQL First
         db_type, engine = get_db_connection()
@@ -644,15 +714,33 @@ class CatalogDB:
             try:
                 with engine.connect() as mconn:
                     mconn.execute(text("""
-                    INSERT INTO dataflow_flows (id, name, description, category, status, rules_json, created_at, updated_at)
-                    VALUES (:id, :name, :description, :category, :status, :rules_json, NOW(), NOW())
-                    ON DUPLICATE KEY UPDATE name=:name, description=:description, category=:category, status=:status, rules_json=:rules_json, updated_at=NOW()
+                    INSERT INTO dataflow_flows (
+                        id, name, description, category, status, sync_mode, watermark_column,
+                        last_watermark_value, last_synced_at, primary_key, source_request_json,
+                        rules_json, created_at, updated_at
+                    ) VALUES (
+                        :id, :name, :description, :category, :status, :sync_mode, :watermark_column,
+                        :last_watermark_value, :last_synced_at, :primary_key, :source_request_json,
+                        :rules_json, NOW(), NOW()
+                    ) ON DUPLICATE KEY UPDATE 
+                        name=:name, description=:description, category=:category, status=:status,
+                        sync_mode=:sync_mode, watermark_column=:watermark_column,
+                        last_watermark_value=COALESCE(:last_watermark_value, last_watermark_value),
+                        last_synced_at=COALESCE(:last_synced_at, last_synced_at),
+                        primary_key=:primary_key, source_request_json=:source_request_json,
+                        rules_json=:rules_json, updated_at=NOW()
                     """), {
                         "id": flow_id,
                         "name": flow_dict["name"],
                         "description": flow_dict.get("description", ""),
                         "category": flow_dict.get("category", "General"),
                         "status": flow_dict.get("status", "active"),
+                        "sync_mode": sync_mode,
+                        "watermark_column": watermark_column,
+                        "last_watermark_value": last_watermark_value,
+                        "last_synced_at": last_synced_at,
+                        "primary_key": primary_key,
+                        "source_request_json": source_req_str,
                         "rules_json": rules_json_str
                     })
                     mconn.commit()
@@ -664,9 +752,17 @@ class CatalogDB:
             conn = sqlite3.connect(settings.CATALOG_DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT OR REPLACE INTO flows (id, name, description, category, status, rules_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (flow_id, flow_dict["name"], flow_dict.get("description", ""), flow_dict.get("category", "General"), flow_dict.get("status", "active"), rules_json_str, now_str, now_str))
+            INSERT OR REPLACE INTO flows (
+                id, name, description, category, status, sync_mode, watermark_column,
+                last_watermark_value, last_synced_at, primary_key, source_request_json,
+                rules_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                flow_id, flow_dict["name"], flow_dict.get("description", ""), flow_dict.get("category", "General"),
+                flow_dict.get("status", "active"), sync_mode, watermark_column, last_watermark_value,
+                last_synced_at if isinstance(last_synced_at, str) else (last_synced_at.isoformat() if last_synced_at else None),
+                primary_key, source_req_str, rules_json_str, now_str, now_str
+            ))
             conn.commit()
             conn.close()
         except Exception:
@@ -676,8 +772,167 @@ class CatalogDB:
             event_type="FLOW_CREATED",
             entity_id=flow_id,
             entity_type="DATA_FLOW",
-            summary=f"Created new data flow: '{flow_dict['name']}' ({flow_dict.get('category', 'General')})",
+            summary=f"Created new data flow: '{flow_dict['name']}' ({flow_dict.get('category', 'General')}) [{sync_mode.upper()}]",
             details=flow_dict
+        )
+
+        return CatalogDB.get_flow(flow_id)
+
+    @staticmethod
+    def update_flow(flow_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        existing = CatalogDB.get_flow(flow_id)
+        if not existing:
+            return None
+
+        # Merge updates
+        for k, v in updates.items():
+            if v is not None:
+                existing[k] = v
+
+        rules_json_str = json.dumps(existing.get("rules", []))
+        sync_mode = existing.get("sync_mode") or "full"
+        watermark_column = existing.get("watermark_column") or "aud_last_update"
+        last_watermark_value = existing.get("last_watermark_value")
+        last_synced_at = existing.get("last_synced_at")
+        primary_key = existing.get("primary_key")
+        source_req = existing.get("source_request")
+        source_req_str = json.dumps(source_req.dict() if hasattr(source_req, "dict") else source_req, default=str) if source_req else None
+        now_str = datetime.utcnow().isoformat()
+
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("""
+                    UPDATE dataflow_flows SET
+                        name=:name, description=:description, category=:category, status=:status,
+                        sync_mode=:sync_mode, watermark_column=:watermark_column,
+                        last_watermark_value=:last_watermark_value, last_synced_at=:last_synced_at,
+                        primary_key=:primary_key, source_request_json=:source_request_json,
+                        rules_json=:rules_json, updated_at=NOW()
+                    WHERE id = :id
+                    """), {
+                        "id": flow_id,
+                        "name": existing["name"],
+                        "description": existing.get("description", ""),
+                        "category": existing.get("category", "General"),
+                        "status": existing.get("status", "active"),
+                        "sync_mode": sync_mode,
+                        "watermark_column": watermark_column,
+                        "last_watermark_value": last_watermark_value,
+                        "last_synced_at": last_synced_at,
+                        "primary_key": primary_key,
+                        "source_request_json": source_req_str,
+                        "rules_json": rules_json_str
+                    })
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE flows SET
+                name=?, description=?, category=?, status=?, sync_mode=?, watermark_column=?,
+                last_watermark_value=?, last_synced_at=?, primary_key=?, source_request_json=?,
+                rules_json=?, updated_at=?
+            WHERE id = ?
+            """, (
+                existing["name"], existing.get("description", ""), existing.get("category", "General"),
+                existing.get("status", "active"), sync_mode, watermark_column, last_watermark_value,
+                last_synced_at if isinstance(last_synced_at, str) else (last_synced_at.isoformat() if last_synced_at else None),
+                primary_key, source_req_str, rules_json_str, now_str, flow_id
+            ))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="FLOW_UPDATED",
+            entity_id=flow_id,
+            entity_type="DATA_FLOW",
+            summary=f"Updated configuration for flow '{existing['name']}'",
+            details=updates
+        )
+
+        return CatalogDB.get_flow(flow_id)
+
+    @staticmethod
+    def update_flow_watermark(flow_id: str, watermark_value: str, synced_at: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+        now_dt = datetime.utcnow()
+        synced_at_val = synced_at or now_dt
+        synced_at_str = synced_at_val.isoformat() if isinstance(synced_at_val, datetime) else str(synced_at_val)
+
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("""
+                    UPDATE dataflow_flows SET
+                        last_watermark_value = :wm,
+                        last_synced_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = :id
+                    """), {"id": flow_id, "wm": str(watermark_value)})
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE flows SET
+                last_watermark_value = ?,
+                last_synced_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """, (str(watermark_value), synced_at_str, now_dt.isoformat(), flow_id))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        return CatalogDB.get_flow(flow_id)
+
+    @staticmethod
+    def reset_flow_watermark(flow_id: str, watermark_value: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        now_str = datetime.utcnow().isoformat()
+        db_type, engine = get_db_connection()
+        if db_type == "mysql" and engine is not None:
+            try:
+                with engine.connect() as mconn:
+                    mconn.execute(text("""
+                    UPDATE dataflow_flows SET
+                        last_watermark_value = :wm,
+                        updated_at = NOW()
+                    WHERE id = :id
+                    """), {"id": flow_id, "wm": watermark_value})
+                    mconn.commit()
+            except Exception:
+                pass
+
+        try:
+            conn = sqlite3.connect(settings.CATALOG_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE flows SET
+                last_watermark_value = ?,
+                updated_at = ?
+            WHERE id = ?
+            """, (watermark_value, now_str, flow_id))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        CatalogDB.record_audit_log(
+            event_type="FLOW_WATERMARK_RESET",
+            entity_id=flow_id,
+            entity_type="DATA_FLOW",
+            summary=f"Reset watermark for flow '{flow_id}' to {watermark_value or 'None (initial)'}"
         )
 
         return CatalogDB.get_flow(flow_id)
@@ -695,6 +950,14 @@ class CatalogDB:
                         f = _format_row(dict(r._mapping))
                         f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
                         f.pop("rules_json", None)
+                        if "source_request_json" in f:
+                            sr = f.get("source_request_json")
+                            f["source_request"] = json.loads(sr) if isinstance(sr, str) else (sr or None)
+                            f.pop("source_request_json", None)
+                        else:
+                            f["source_request"] = None
+                        f["sync_mode"] = f.get("sync_mode") or "full"
+                        f["watermark_column"] = f.get("watermark_column") or "aud_last_update"
                         # Fetch linked dataset count & row count strictly for this flow
                         ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid"), {"fid": f["id"]})
                         ds_count, total_rows = ds_res.fetchone()
@@ -718,6 +981,14 @@ class CatalogDB:
                 f = dict(r)
                 f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
                 f.pop("rules_json", None)
+                if "source_request_json" in f:
+                    sr = f.get("source_request_json")
+                    f["source_request"] = json.loads(sr) if isinstance(sr, str) else (sr or None)
+                    f.pop("source_request_json", None)
+                else:
+                    f["source_request"] = None
+                f["sync_mode"] = f.get("sync_mode") or "full"
+                f["watermark_column"] = f.get("watermark_column") or "aud_last_update"
                 cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ?", (f["id"],))
                 ds_count, total_rows = cursor.fetchone()
                 f["dataset_count"] = ds_count or 0
@@ -741,6 +1012,14 @@ class CatalogDB:
                         f = _format_row(dict(row._mapping))
                         f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
                         f.pop("rules_json", None)
+                        if "source_request_json" in f:
+                            sr = f.get("source_request_json")
+                            f["source_request"] = json.loads(sr) if isinstance(sr, str) else (sr or None)
+                            f.pop("source_request_json", None)
+                        else:
+                            f["source_request"] = None
+                        f["sync_mode"] = f.get("sync_mode") or "full"
+                        f["watermark_column"] = f.get("watermark_column") or "aud_last_update"
                         ds_res = mconn.execute(text("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM dataflow_staged_datasets WHERE flow_id = :fid"), {"fid": flow_id})
                         ds_count, total_rows = ds_res.fetchone()
                         f["dataset_count"] = ds_count or 0
@@ -762,6 +1041,14 @@ class CatalogDB:
             f = dict(row)
             f["rules"] = json.loads(f["rules_json"]) if isinstance(f.get("rules_json"), str) else (f.get("rules_json") or [])
             f.pop("rules_json", None)
+            if "source_request_json" in f:
+                sr = f.get("source_request_json")
+                f["source_request"] = json.loads(sr) if isinstance(sr, str) else (sr or None)
+                f.pop("source_request_json", None)
+            else:
+                f["source_request"] = None
+            f["sync_mode"] = f.get("sync_mode") or "full"
+            f["watermark_column"] = f.get("watermark_column") or "aud_last_update"
             cursor.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM staged_datasets WHERE flow_id = ?", (flow_id,))
             ds_count, total_rows = cursor.fetchone()
             f["dataset_count"] = ds_count or 0
@@ -863,7 +1150,7 @@ class CatalogDB:
     def record_audit_log(event_type: str, summary: str, entity_id: Optional[str] = None, entity_type: Optional[str] = None, details: Optional[Any] = None):
         log_id = f"aud_{uuid.uuid4().hex[:10]}"
         now_str = datetime.utcnow().isoformat()
-        details_str = json.dumps(details) if details is not None else None
+        details_str = json.dumps(details, default=str) if details is not None else None
 
         db_type, engine = get_db_connection()
         if db_type == "mysql" and engine is not None:
@@ -982,6 +1269,11 @@ class CatalogDB:
     def save_staged_dataset(dataset_dict: Dict[str, Any]):
         created_str = dataset_dict["created_at"] if isinstance(dataset_dict["created_at"], str) else dataset_dict["created_at"].isoformat()
         columns_json_str = json.dumps([col.dict() if hasattr(col, "dict") else col for col in dataset_dict["columns"]])
+        sync_mode = dataset_dict.get("sync_mode") or "full"
+        watermark_column = dataset_dict.get("watermark_column") or "aud_last_update"
+        last_watermark_value = dataset_dict.get("last_watermark_value")
+        last_synced_at = dataset_dict.get("last_synced_at")
+        primary_key = dataset_dict.get("primary_key")
 
         # 1. MySQL First
         db_type, engine = get_db_connection()
@@ -990,10 +1282,13 @@ class CatalogDB:
                 with engine.connect() as mconn:
                     mconn.execute(text("""
                     INSERT INTO dataflow_staged_datasets 
-                    (id, flow_id, name, description, source_type, source_summary, row_count, column_count, storage_path, storage_format, columns_json, file_size_bytes, created_at)
-                    VALUES (:id, :flow_id, :name, :description, :source_type, :source_summary, :row_count, :column_count, :storage_path, :storage_format, :columns_json, :file_size_bytes, NOW())
+                    (id, flow_id, name, description, source_type, source_summary, sync_mode, watermark_column, last_watermark_value, last_synced_at, primary_key, row_count, column_count, storage_path, storage_format, columns_json, file_size_bytes, created_at)
+                    VALUES (:id, :flow_id, :name, :description, :source_type, :source_summary, :sync_mode, :watermark_column, :last_watermark_value, :last_synced_at, :primary_key, :row_count, :column_count, :storage_path, :storage_format, :columns_json, :file_size_bytes, NOW())
                     ON DUPLICATE KEY UPDATE 
-                        flow_id=:flow_id, name=:name, description=:description, row_count=:row_count, column_count=:column_count, storage_path=:storage_path, storage_format=:storage_format, file_size_bytes=:file_size_bytes
+                        flow_id=:flow_id, name=:name, description=:description, sync_mode=:sync_mode, watermark_column=:watermark_column,
+                        last_watermark_value=COALESCE(:last_watermark_value, last_watermark_value),
+                        last_synced_at=COALESCE(:last_synced_at, last_synced_at),
+                        primary_key=:primary_key, row_count=:row_count, column_count=:column_count, storage_path=:storage_path, storage_format=:storage_format, file_size_bytes=:file_size_bytes
                     """), {
                         "id": dataset_dict["id"],
                         "flow_id": dataset_dict.get("flow_id"),
@@ -1001,6 +1296,11 @@ class CatalogDB:
                         "description": dataset_dict.get("description", ""),
                         "source_type": dataset_dict["source_type"] if isinstance(dataset_dict["source_type"], str) else dataset_dict["source_type"].value,
                         "source_summary": dataset_dict.get("source_summary", ""),
+                        "sync_mode": sync_mode,
+                        "watermark_column": watermark_column,
+                        "last_watermark_value": last_watermark_value,
+                        "last_synced_at": last_synced_at,
+                        "primary_key": primary_key,
                         "row_count": dataset_dict["row_count"],
                         "column_count": dataset_dict["column_count"],
                         "storage_path": dataset_dict["storage_path"],
@@ -1018,8 +1318,8 @@ class CatalogDB:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT OR REPLACE INTO staged_datasets 
-            (id, flow_id, name, description, source_type, source_summary, row_count, column_count, storage_path, storage_format, created_at, columns_json, file_size_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, flow_id, name, description, source_type, source_summary, sync_mode, watermark_column, last_watermark_value, last_synced_at, primary_key, row_count, column_count, storage_path, storage_format, created_at, columns_json, file_size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dataset_dict["id"],
                 dataset_dict.get("flow_id"),
@@ -1027,6 +1327,11 @@ class CatalogDB:
                 dataset_dict.get("description", ""),
                 dataset_dict["source_type"] if isinstance(dataset_dict["source_type"], str) else dataset_dict["source_type"].value,
                 dataset_dict.get("source_summary", ""),
+                sync_mode,
+                watermark_column,
+                last_watermark_value,
+                last_synced_at if isinstance(last_synced_at, str) else (last_synced_at.isoformat() if last_synced_at else None),
+                primary_key,
                 dataset_dict["row_count"],
                 dataset_dict["column_count"],
                 dataset_dict["storage_path"],
@@ -1044,8 +1349,8 @@ class CatalogDB:
             event_type="DATASET_STAGED",
             entity_id=dataset_dict["id"],
             entity_type="STAGED_DATASET",
-            summary=f"Staged dataset '{dataset_dict['name']}' ({dataset_dict['row_count']} rows, {dataset_dict['column_count']} cols) to MySQL Database",
-            details={"id": dataset_dict["id"], "flow_id": dataset_dict.get("flow_id"), "format": dataset_dict.get("storage_format", "mysql_table")}
+            summary=f"Staged dataset '{dataset_dict['name']}' ({dataset_dict['row_count']} rows, {dataset_dict['column_count']} cols) [{sync_mode.upper()}] to Lakehouse Database",
+            details={"id": dataset_dict["id"], "flow_id": dataset_dict.get("flow_id"), "format": dataset_dict.get("storage_format", "mysql_table"), "sync_mode": sync_mode}
         )
 
     @staticmethod
@@ -1060,6 +1365,8 @@ class CatalogDB:
                         d = _format_row(dict(row._mapping))
                         d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
                         d.pop("columns_json", None)
+                        d["sync_mode"] = d.get("sync_mode") or "full"
+                        d["watermark_column"] = d.get("watermark_column") or "aud_last_update"
                         return d
             except Exception:
                 pass
@@ -1076,6 +1383,8 @@ class CatalogDB:
             d = dict(row)
             d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
             d.pop("columns_json", None)
+            d["sync_mode"] = d.get("sync_mode") or "full"
+            d["watermark_column"] = d.get("watermark_column") or "aud_last_update"
             return d
         except Exception:
             return None
@@ -1096,6 +1405,8 @@ class CatalogDB:
                         d = _format_row(dict(r._mapping))
                         d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
                         d.pop("columns_json", None)
+                        d["sync_mode"] = d.get("sync_mode") or "full"
+                        d["watermark_column"] = d.get("watermark_column") or "aud_last_update"
                         results.append(d)
                     return results
             except Exception:
@@ -1116,6 +1427,8 @@ class CatalogDB:
                 d = dict(r)
                 d["columns"] = json.loads(d["columns_json"]) if isinstance(d.get("columns_json"), str) else (d.get("columns_json") or [])
                 d.pop("columns_json", None)
+                d["sync_mode"] = d.get("sync_mode") or "full"
+                d["watermark_column"] = d.get("watermark_column") or "aud_last_update"
                 results.append(d)
             return results
         except Exception:

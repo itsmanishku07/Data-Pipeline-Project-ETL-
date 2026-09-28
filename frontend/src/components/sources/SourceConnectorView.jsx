@@ -3,6 +3,7 @@ import {
   GitBranch, Plus, X, Database, Cloud, Layers, Upload, CheckCircle2, AlertCircle, ArrowRight, RefreshCw, Table as TableIcon, Code2, Save, Trash2, BookmarkCheck, Zap, Server, Search, CheckSquare, Square, Folder, FolderOpen, FileText, ChevronRight, CornerDownRight, Sparkles, Eye, EyeOff, Boxes, Check, TableProperties
 } from 'lucide-react';
 import { DataFlowAPI, extractErrorMessage } from '../../services/api';
+import { useTimezone } from '../../context/TimezoneContext';
 
 const sourceEngines = [
   { id: 'mysql', name: 'MySQL', icon: Database },
@@ -22,6 +23,7 @@ export const SourceConnectorView = ({
   onSourceInspected,
   onNavigateToStep
 }) => {
+  const { formatDate } = useTimezone();
   const [activeSource, setActiveSource] = useState('mysql');
   const [connectionName, setConnectionName] = useState('MySQL Database');
 
@@ -960,7 +962,7 @@ export const SourceConnectorView = ({
                   )}
 
                   <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 font-mono">
-                    <span>Ingested: {new Date(ds.created_at || Date.now()).toLocaleDateString()}</span>
+                    <span>Ingested: {formatDate(ds.created_at || Date.now())}</span>
                     <button
                       type="button"
                       onClick={() => onNavigateToStep && onNavigateToStep(4)}

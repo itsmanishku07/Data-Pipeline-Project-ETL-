@@ -9,6 +9,8 @@ import { TransformationStudioView } from './components/transform/TransformationS
 import { PipelineExecutionView } from './components/pipeline/PipelineExecutionView';
 import { HistoryAuditView } from './components/history/HistoryAuditView';
 import { ScheduledFlowsView } from './components/schedules/ScheduledFlowsView';
+import { SettingsModal } from './components/common/SettingsModal';
+import { TimezoneProvider } from './context/TimezoneContext';
 import { DataFlowAPI } from './services/api';
 import { 
   GitBranch,
@@ -45,6 +47,7 @@ export const App = () => {
 
   const [maxStepReached, setMaxStepReached] = useState(7);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Flows state with persistence
   const [flows, setFlows] = useState([]);
@@ -304,66 +307,49 @@ export const App = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex font-sans transition-colors duration-150 antialiased overflow-hidden">
-      {/* Left Modern Sidebar (Desktop + Mobile Sliding Drawer) */}
-      <Sidebar
-        currentStep={currentStep}
-        onStepClick={goToStep}
-        maxStepReached={maxStepReached}
-        isDark={isDark}
-        onToggleTheme={toggleTheme}
-        stagedCount={allStagedDatasets.length}
-        isOpen={mobileMenuOpen}
-        onClose={() => setMobileMenuOpen(false)}
-        isHidden={sidebarHidden}
-        onToggleHide={toggleSidebar}
-      />
-
-      {/* Main Workspace Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto overflow-x-hidden">
-        <TopHeader 
-          currentStep={currentStep} 
-          flows={flows}
-          activeFlowId={activeFlowId}
-          onSelectFlow={handleFlowSelect}
-          activeDatasetName={activeStagedDataset?.name} 
-          onOpenMobileMenu={() => setMobileMenuOpen(true)}
-          isSidebarHidden={sidebarHidden}
-          onToggleSidebar={toggleSidebar}
+    <TimezoneProvider>
+      <div className="h-screen w-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex font-sans transition-colors duration-150 antialiased overflow-hidden">
+        {/* Left Modern Sidebar (Desktop + Mobile Sliding Drawer) */}
+        <Sidebar
+          currentStep={currentStep}
+          onStepClick={goToStep}
+          maxStepReached={maxStepReached}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+          stagedCount={allStagedDatasets.length}
+          isOpen={mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          isHidden={sidebarHidden}
+          onToggleHide={toggleSidebar}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
-        <main className="flex-1 w-full px-4 sm:px-8 py-6 pb-24 md:pb-8">
-          {currentStep === 0 && (
-            <FlowsOverviewTrackerView
-              flows={flows}
-              activeFlowId={activeFlowId}
-              onSelectFlow={handleFlowSelect}
-              onNavigateToStep={goToStep}
-              onRefreshFlows={refreshFlowsAndDatasets}
-            />
-          )}
+        {/* Main Workspace Area */}
+        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto overflow-x-hidden">
+          <TopHeader 
+            currentStep={currentStep} 
+            flows={flows}
+            activeFlowId={activeFlowId}
+            onSelectFlow={handleFlowSelect}
+            activeDatasetName={activeStagedDataset?.name} 
+            onOpenMobileMenu={() => setMobileMenuOpen(true)}
+            isSidebarHidden={sidebarHidden}
+            onToggleSidebar={toggleSidebar}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
 
-          {currentStep === 1 && (
-            <SourceConnectorView 
-              flows={flows}
-              activeFlowId={activeFlowId}
-              onSelectFlow={handleFlowSelect}
-              onRefreshFlows={refreshFlowsAndDatasets}
-              onSourceInspected={handleSourceInspected}
-              onNavigateToStep={goToStep}
-            />
-          )}
-
-          {currentStep === 2 && (
-            sourceRequest && inspectionResult ? (
-              <SchemaEditorView
-                sourceRequest={sourceRequest}
-                inspectionResult={inspectionResult}
+          <main className="flex-1 w-full px-4 sm:px-8 py-6 pb-24 md:pb-8">
+            {currentStep === 0 && (
+              <FlowsOverviewTrackerView
+                flows={flows}
                 activeFlowId={activeFlowId}
-                onBack={() => goToStep(1)}
-                onDatasetStaged={handleDatasetStaged}
+                onSelectFlow={handleFlowSelect}
+                onNavigateToStep={goToStep}
+                onRefreshFlows={refreshFlowsAndDatasets}
               />
-            ) : (
+            )}
+
+            {currentStep === 1 && (
               <SourceConnectorView 
                 flows={flows}
                 activeFlowId={activeFlowId}
@@ -372,94 +358,123 @@ export const App = () => {
                 onSourceInspected={handleSourceInspected}
                 onNavigateToStep={goToStep}
               />
-            )
-          )}
+            )}
 
-          {currentStep === 3 && (
-            <StagingAreaView
-              initialDatasetId={activeStagedDataset?.id}
-              activeFlowId={activeFlowId}
-              flows={flows}
-              allDatasets={allStagedDatasets}
-              onSelectFlow={handleFlowSelect}
-              onSelectDatasetForTransform={handleSelectDatasetForTransform}
-              onAddNewSource={() => goToStep(1)}
-            />
-          )}
+            {currentStep === 2 && (
+              sourceRequest && inspectionResult ? (
+                <SchemaEditorView
+                  sourceRequest={sourceRequest}
+                  inspectionResult={inspectionResult}
+                  activeFlowId={activeFlowId}
+                  onBack={() => goToStep(1)}
+                  onDatasetStaged={handleDatasetStaged}
+                />
+              ) : (
+                <SourceConnectorView 
+                  flows={flows}
+                  activeFlowId={activeFlowId}
+                  onSelectFlow={handleFlowSelect}
+                  onRefreshFlows={refreshFlowsAndDatasets}
+                  onSourceInspected={handleSourceInspected}
+                  onNavigateToStep={goToStep}
+                />
+              )
+            )}
 
-          {currentStep === 4 && (
-            <TransformationStudioView
-              allDatasets={allStagedDatasets}
-              activeFlowId={activeFlowId}
-              flows={flows}
-              initialDatasetId={activeStagedDataset?.id}
-              onSelectFlow={handleFlowSelect}
-              onProceedToExecution={handleProceedToExecution}
-              onBackToStaging={() => goToStep(3)}
-            />
-          )}
+            {currentStep === 3 && (
+              <StagingAreaView
+                initialDatasetId={activeStagedDataset?.id}
+                activeFlowId={activeFlowId}
+                flows={flows}
+                allDatasets={allStagedDatasets}
+                onSelectFlow={handleFlowSelect}
+                onSelectDatasetForTransform={handleSelectDatasetForTransform}
+                onAddNewSource={() => goToStep(1)}
+              />
+            )}
 
-          {currentStep === 5 && (
-            <PipelineExecutionView
-              stagedDataset={activeStagedDataset}
-              rules={activeRules}
-              flows={flows}
-              activeFlowId={activeFlowId}
-              allStagedDatasets={allStagedDatasets}
-              onSelectFlow={handleFlowSelect}
-              onViewStagedDataset={(id) => {
-                const ds = allStagedDatasets.find((d) => d.id === id);
-                if (ds) setActiveStagedDataset(ds);
-                goToStep(3);
-              }}
-              onRestartPipeline={() => goToStep(1)}
-            />
-          )}
+            {currentStep === 4 && (
+              <TransformationStudioView
+                allDatasets={allStagedDatasets}
+                activeFlowId={activeFlowId}
+                flows={flows}
+                initialDatasetId={activeStagedDataset?.id}
+                onSelectFlow={handleFlowSelect}
+                onProceedToExecution={handleProceedToExecution}
+                onBackToStaging={() => goToStep(3)}
+              />
+            )}
 
-          {currentStep === 6 && (
-            <HistoryAuditView />
-          )}
+            {currentStep === 5 && (
+              <PipelineExecutionView
+                stagedDataset={activeStagedDataset}
+                rules={activeRules}
+                flows={flows}
+                activeFlowId={activeFlowId}
+                allStagedDatasets={allStagedDatasets}
+                onSelectFlow={handleFlowSelect}
+                onViewStagedDataset={(id) => {
+                  const ds = allStagedDatasets.find((d) => d.id === id);
+                  if (ds) setActiveStagedDataset(ds);
+                  goToStep(3);
+                }}
+                onRestartPipeline={() => goToStep(1)}
+              />
+            )}
 
-          {currentStep === 7 && (
-            <ScheduledFlowsView
-              flows={flows}
-              allDatasets={allStagedDatasets}
-              activeFlowId={activeFlowId}
-              onSelectFlow={handleFlowSelect}
-            />
-          )}
-        </main>
+            {currentStep === 6 && (
+              <HistoryAuditView />
+            )}
+
+            {currentStep === 7 && (
+              <ScheduledFlowsView
+                flows={flows}
+                allDatasets={allStagedDatasets}
+                activeFlowId={activeFlowId}
+                onSelectFlow={handleFlowSelect}
+              />
+            )}
+          </main>
+        </div>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <nav className="fixed bottom-0 inset-x-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200 dark:border-zinc-800 z-30 md:hidden flex items-center justify-between px-2 py-1.5 safe-area-pb">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentStep === item.id;
+            const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6 || item.id === 7;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => isAccessible && goToStep(item.id)}
+                disabled={!isAccessible}
+                className={`flex-1 min-w-[42px] max-w-[58px] flex flex-col items-center justify-center py-1 px-1 rounded-md transition-colors ${
+                  isActive
+                    ? 'text-zinc-900 dark:text-zinc-100 font-semibold'
+                    : isAccessible
+                    ? 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
+                    : 'text-zinc-300 dark:text-zinc-700 opacity-40 cursor-not-allowed'
+                }`}
+              >
+                <div className={`p-1 rounded-md ${isActive ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Settings Preferences Modal */}
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+        />
       </div>
-
-      {/* Mobile Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200 dark:border-zinc-800 z-30 md:hidden flex items-center justify-between px-2 py-1.5 safe-area-pb">
-        {mobileNavItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentStep === item.id;
-          const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6 || item.id === 7;
-
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => isAccessible && goToStep(item.id)}
-              disabled={!isAccessible}
-              className={`flex-1 min-w-[42px] max-w-[58px] flex flex-col items-center justify-center py-1 px-1 rounded-md transition-colors ${
-                isActive
-                  ? 'text-zinc-900 dark:text-zinc-100 font-semibold'
-                  : isAccessible
-                  ? 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
-                  : 'text-zinc-300 dark:text-zinc-700 opacity-40 cursor-not-allowed'
-              }`}
-            >
-              <div className={`p-1 rounded-md ${isActive ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}>
-                <Icon className="w-4 h-4" />
-              </div>
-              <span className="text-[10px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </div>
+    </TimezoneProvider>
   );
 };

@@ -403,9 +403,15 @@ class JobService:
             output_dataset_id = None
             if request.stage_output:
                 output_dataset_id = f"stg_curated_{uuid.uuid4().hex[:8]}"
-                out_path, out_fmt, file_size = DataStoreEngine.save_staged_dataframe(output_dataset_id, df_out)
+                out_path, out_fmt, file_size, total_curated_rows, out_wm = DataStoreEngine.save_staged_dataframe(
+                    dataset_id=output_dataset_id,
+                    df=df_out,
+                    flow_id=resolved_flow_id,
+                    sync_mode="full"
+                )
 
                 column_profiles = profile_dataframe(df_out)
+                now_dt = datetime.utcnow()
                 staged_info = {
                     "id": output_dataset_id,
                     "flow_id": request.flow_id,
@@ -413,16 +419,20 @@ class JobService:
                     "description": request.output_description or f"Transformed from {meta['name']}",
                     "source_type": "transformed_pipeline",
                     "source_summary": f"Pipeline: {request.name} (from {meta['name']})",
-                    "row_count": len(df_out),
+                    "sync_mode": "full",
+                    "watermark_column": "aud_last_update",
+                    "last_watermark_value": out_wm,
+                    "last_synced_at": now_dt,
+                    "row_count": total_curated_rows,
                     "column_count": len(df_out.columns),
                     "storage_path": out_path,
                     "storage_format": out_fmt,
-                    "created_at": datetime.utcnow(),
+                    "created_at": now_dt,
                     "columns": column_profiles,
                     "file_size_bytes": file_size
                 }
                 CatalogDB.save_staged_dataset(staged_info)
-                logs.append(f"Successfully staged curated output dataset into MySQL table as '{request.output_dataset_name}' (ID: {output_dataset_id}).")
+                logs.append(f"Successfully staged curated output dataset into Lakehouse table as '{request.output_dataset_name}' (ID: {output_dataset_id}).")
 
             # 4. Optional Export File
             output_file_path = None

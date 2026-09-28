@@ -2,6 +2,7 @@ import os
 import json
 import urllib.parse
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 from sqlalchemy import text
@@ -21,7 +22,9 @@ class DataStoreEngine:
     def _clean_record(rec: Dict[str, Any]) -> Dict[str, Any]:
         cleaned = {}
         for k, v in rec.items():
-            if pd.isna(v) or v is None:
+            if k == "aud_last_update" and (v is None or pd.isna(v) or str(v).lower() in ("nat", "none", "nan")):
+                cleaned[k] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            elif pd.isna(v) or v is None:
                 cleaned[k] = None
             elif hasattr(v, "isoformat"):
                 cleaned[k] = v.isoformat()
@@ -29,36 +32,109 @@ class DataStoreEngine:
                 cleaned[k] = v
             else:
                 cleaned[k] = str(v)
+        if "aud_last_update" not in cleaned or not cleaned["aud_last_update"]:
+            cleaned["aud_last_update"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         return cleaned
 
     @staticmethod
-    def save_staged_dataframe(dataset_id: str, df: pd.DataFrame, flow_id: Optional[str] = None) -> Tuple[str, str, int]:
+    def save_staged_dataframe(
+        dataset_id: str, 
+        df: pd.DataFrame, 
+        flow_id: Optional[str] = None,
+        sync_mode: str = "full",
+        primary_key: Optional[str] = None,
+        watermark_col: str = "aud_last_update"
+    ) -> Tuple[str, str, int, int, Optional[str]]:
         """
-        Saves DataFrame records into the unified standard `dataflow_staged_records` table.
-        Returns: (storage_path, storage_format, size_bytes)
+        Saves DataFrame records into the unified standard staging table with support for:
+        - `full`: Complete refresh
+        - `incremental_append`: Appends new records into stage
+        - `incremental_merge`: Upserts records matching primary_key with latest aud_last_update
+        Returns: (storage_path, storage_format, size_bytes, total_row_count, new_watermark_value)
         """
         records = df.to_dict(orient="records")
         db_type, engine = get_db_connection()
+        
+        # Calculate new watermark
+        new_watermark = None
+        if watermark_col in df.columns and not df[watermark_col].empty:
+            non_null_wm = df[watermark_col].dropna()
+            if not non_null_wm.empty:
+                max_val = non_null_wm.max()
+                if max_val is not None and not pd.isna(max_val):
+                    new_watermark = max_val.isoformat() if hasattr(max_val, "isoformat") else str(max_val)
+        if not new_watermark and not df.empty and "aud_last_update" in df.columns:
+            non_null_aud = df["aud_last_update"].dropna()
+            if not non_null_aud.empty:
+                max_val = non_null_aud.max()
+                if max_val is not None and not pd.isna(max_val):
+                    new_watermark = max_val.isoformat() if hasattr(max_val, "isoformat") else str(max_val)
+        
+        if new_watermark is not None:
+            if pd.isna(new_watermark) or str(new_watermark).strip().lower() in ("nat", "nan", "none", "<na>", "null", ""):
+                new_watermark = None
+            else:
+                new_watermark = str(new_watermark)
 
+        total_count = len(records)
+
+        # 1. MySQL Storage
         if db_type == "mysql" and engine is not None:
             try:
                 with engine.connect() as conn:
-                    # Delete any previous rows for this dataset
-                    conn.execute(text("DELETE FROM dataflow_staged_records WHERE dataset_id = :did"), {"did": dataset_id})
-                    
-                    # Batch insert all rows into unified table
-                    if records:
+                    if sync_mode == "incremental_merge" and primary_key:
+                        # Load existing records for merging
+                        res = conn.execute(
+                            text("SELECT data_json FROM dataflow_staged_records WHERE dataset_id = :did"),
+                            {"did": dataset_id}
+                        )
+                        existing_rows = res.fetchall()
+                        merged_dict = {}
+                        for r in existing_rows:
+                            d = json.loads(r[0])
+                            pk_val = str(d.get(primary_key, ""))
+                            if pk_val:
+                                merged_dict[pk_val] = d
+
+                        # Update / merge with new batch
+                        for r in records:
+                            cleaned_r = DataStoreEngine._clean_record(r)
+                            pk_val = str(cleaned_r.get(primary_key, ""))
+                            if pk_val:
+                                merged_dict[pk_val] = cleaned_r
+
+                        final_records = list(merged_dict.values())
+                        conn.execute(text("DELETE FROM dataflow_staged_records WHERE dataset_id = :did"), {"did": dataset_id})
+                        records_to_insert = final_records
+                        start_idx = 0
+                        total_count = len(final_records)
+                    elif sync_mode == "incremental_append":
+                        # Get current max index
+                        res = conn.execute(
+                            text("SELECT COALESCE(MAX(row_index), -1) FROM dataflow_staged_records WHERE dataset_id = :did"),
+                            {"did": dataset_id}
+                        )
+                        start_idx = (res.scalar() or -1) + 1
+                        records_to_insert = records
+                        total_count = start_idx + len(records)
+                    else:
+                        # Full replace
+                        conn.execute(text("DELETE FROM dataflow_staged_records WHERE dataset_id = :did"), {"did": dataset_id})
+                        records_to_insert = records
+                        start_idx = 0
+                        total_count = len(records)
+
+                    if records_to_insert:
                         batch_data = []
-                        for idx, r in enumerate(records):
+                        for idx, r in enumerate(records_to_insert):
                             cleaned_r = DataStoreEngine._clean_record(r)
                             batch_data.append({
                                 "dataset_id": dataset_id,
                                 "flow_id": flow_id,
-                                "row_index": idx,
+                                "row_index": start_idx + idx,
                                 "data_json": json.dumps(cleaned_r)
                             })
                         
-                        # Chunked multi-row inserts
                         chunk_size = 1000
                         for i in range(0, len(batch_data), chunk_size):
                             chunk = batch_data[i:i + chunk_size]
@@ -71,28 +147,60 @@ class DataStoreEngine:
                             )
                     conn.commit()
                 storage_path = f"mysql://table/dataflow_staged_records/{dataset_id}"
-                return storage_path, "mysql_table", 0
+                return storage_path, "mysql_table", 0, total_count, new_watermark
             except Exception as e:
                 print(f"[WARN] Failed to write into MySQL dataflow_staged_records: {e}")
 
-        # Fallback / sync into SQLite staged_records
+        # 2. SQLite Storage Fallback
         init_db()
         conn = sqlite3.connect(settings.CATALOG_DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM staged_records WHERE dataset_id = ?", (dataset_id,))
-        if records:
-            batch_data = []
-            for idx, r in enumerate(records):
+
+        if sync_mode == "incremental_merge" and primary_key:
+            cursor.execute("SELECT data_json FROM staged_records WHERE dataset_id = ?", (dataset_id,))
+            existing_rows = cursor.fetchall()
+            merged_dict = {}
+            for r in existing_rows:
+                d = json.loads(r[0])
+                pk_val = str(d.get(primary_key, ""))
+                if pk_val:
+                    merged_dict[pk_val] = d
+            for r in records:
                 cleaned_r = DataStoreEngine._clean_record(r)
-                batch_data.append((dataset_id, flow_id, idx, json.dumps(cleaned_r)))
+                pk_val = str(cleaned_r.get(primary_key, ""))
+                if pk_val:
+                    merged_dict[pk_val] = cleaned_r
+            final_records = list(merged_dict.values())
+            cursor.execute("DELETE FROM staged_records WHERE dataset_id = ?", (dataset_id,))
+            records_to_insert = final_records
+            start_idx = 0
+            total_count = len(final_records)
+        elif sync_mode == "incremental_append":
+            cursor.execute("SELECT COALESCE(MAX(row_index), -1) FROM staged_records WHERE dataset_id = ?", (dataset_id,))
+            row = cursor.fetchone()
+            start_idx = (row[0] if row else -1) + 1
+            records_to_insert = records
+            total_count = start_idx + len(records)
+        else:
+            cursor.execute("DELETE FROM staged_records WHERE dataset_id = ?", (dataset_id,))
+            records_to_insert = records
+            start_idx = 0
+            total_count = len(records)
+
+        if records_to_insert:
+            batch_data = []
+            for idx, r in enumerate(records_to_insert):
+                cleaned_r = DataStoreEngine._clean_record(r)
+                batch_data.append((dataset_id, flow_id, start_idx + idx, json.dumps(cleaned_r)))
             cursor.executemany("""
             INSERT INTO staged_records (dataset_id, flow_id, row_index, data_json, created_at)
             VALUES (?, ?, ?, ?, datetime('now'))
             """, batch_data)
+
         conn.commit()
         conn.close()
         storage_path = f"sqlite://table/staged_records/{dataset_id}"
-        return storage_path, "sqlite_table", 0
+        return storage_path, "sqlite_table", 0, total_count, new_watermark
 
     @staticmethod
     def _enforce_schema_types(df: pd.DataFrame, columns_meta: List[Any]) -> pd.DataFrame:

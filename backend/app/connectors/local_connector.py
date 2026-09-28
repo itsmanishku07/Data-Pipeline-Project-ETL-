@@ -24,7 +24,12 @@ class LocalConnector(BaseConnector):
         except Exception as e:
             return False, f"File source validation failed: {str(e)}"
 
-    def extract_data(self, limit: Optional[int] = None) -> pd.DataFrame:
+    def extract_data(
+        self, 
+        limit: Optional[int] = None,
+        watermark_col: Optional[str] = None,
+        last_watermark: Optional[str] = None
+    ) -> pd.DataFrame:
         path = self._resolve_path()
         if not path.exists():
             raise FileNotFoundError(f"Source file {path} not found.")
@@ -43,8 +48,15 @@ class LocalConnector(BaseConnector):
             except Exception:
                 df = pd.read_csv(path, nrows=limit if limit else None)
 
+        # Apply watermark filter if specified
+        if watermark_col and last_watermark and watermark_col in df.columns:
+            df = df[df[watermark_col].astype(str) > str(last_watermark)]
+
         if limit and len(df) > limit:
             df = df.head(limit)
+
+        # Stamp standard enterprise audit column
+        df = self.append_audit_timestamp(df)
         return df
 
     def get_source_summary(self) -> str:

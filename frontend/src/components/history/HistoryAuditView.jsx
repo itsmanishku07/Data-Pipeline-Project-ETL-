@@ -18,8 +18,10 @@ import {
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { useTimezone } from '../../context/TimezoneContext';
 
 export const HistoryAuditView = () => {
+  const { formatDateTime, formatTime, timezoneShort } = useTimezone();
   const [activeTab, setActiveTab] = useState('audit'); // 'audit', 'ingestion', 'transform', 'credentials', 'schema'
   const [summary, setSummary] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -309,7 +311,7 @@ export const HistoryAuditView = () => {
                             {log.event_type}
                           </span>
                           <span className="text-[10px] text-zinc-400 font-mono">
-                            {new Date(log.created_at).toLocaleTimeString()}
+                            {formatTime(log.created_at, true)}
                           </span>
                         </div>
                         <p className="text-xs font-medium text-zinc-900 dark:text-zinc-200 mt-1 truncate">
@@ -348,7 +350,7 @@ export const HistoryAuditView = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-400">Timestamp:</span>
-                    <span className="text-zinc-700 dark:text-zinc-300">{new Date(selectedLog.created_at).toLocaleString()}</span>
+                    <span className="text-zinc-700 dark:text-zinc-300">{formatDateTime(selectedLog.created_at, true)}</span>
                   </div>
                 </div>
 
@@ -525,7 +527,7 @@ export const HistoryAuditView = () => {
                           {ing.status}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-zinc-500">{new Date(ing.created_at).toLocaleString()}</td>
+                      <td className="py-2 px-3 text-zinc-500">{formatDateTime(ing.created_at, true)}</td>
                     </tr>
                   ))
                 )}
@@ -567,7 +569,7 @@ export const HistoryAuditView = () => {
                       <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400">{tx.initial_rows.toLocaleString()}</td>
                       <td className="py-2 px-3 text-emerald-600 dark:text-emerald-400 font-medium">{tx.transformed_rows.toLocaleString()}</td>
                       <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{Math.round(tx.execution_time_ms)} ms</td>
-                      <td className="py-2 px-3 text-zinc-500">{new Date(tx.created_at).toLocaleString()}</td>
+                      <td className="py-2 px-3 text-zinc-500">{formatDateTime(tx.created_at, true)}</td>
                     </tr>
                   ))
                 )}

@@ -20,9 +20,18 @@ from .data_store import DataStoreEngine
 class StagingService:
     @staticmethod
     def stage_dataset(request: StageDatasetRequest) -> StagedDatasetInfo:
-        # 1. Extract raw data
+        flow = CatalogDB.get_flow(request.flow_id) if request.flow_id else None
+        last_wm = flow.get("last_watermark_value") if flow else None
+        sync_mode = request.sync_mode or (flow.get("sync_mode") if flow else "full") or "full"
+        watermark_col = request.watermark_column or (flow.get("watermark_column") if flow else "aud_last_update") or "aud_last_update"
+        pk = request.primary_key or (flow.get("primary_key") if flow else None)
+
+        # 1. Extract raw data with watermark filter if incremental
         connector = get_connector(request.source_request)
-        df_raw = connector.extract_data()
+        if sync_mode in ("incremental_append", "incremental_merge") and last_wm:
+            df_raw = connector.extract_data(watermark_col=watermark_col, last_watermark=last_wm)
+        else:
+            df_raw = connector.extract_data(watermark_col=watermark_col)
         
         # 2. Apply user-defined type casting rules if specified
         if request.cast_rules:
@@ -33,14 +42,25 @@ class StagingService:
         # 3. Generate unique dataset ID
         dataset_id = f"stg_{uuid.uuid4().hex[:10]}"
         
-        # 4. Save directly into MySQL database staging table (zero parquet disk files)
-        storage_path, storage_format, file_size = DataStoreEngine.save_staged_dataframe(dataset_id, df_staged, flow_id=request.flow_id)
+        # 4. Save directly into lakehouse database staging table with sync strategy
+        storage_path, storage_format, file_size, total_row_count, new_watermark = DataStoreEngine.save_staged_dataframe(
+            dataset_id=dataset_id,
+            df=df_staged,
+            flow_id=request.flow_id,
+            sync_mode=sync_mode,
+            primary_key=pk,
+            watermark_col=watermark_col
+        )
 
         # 5. Profile staged data schema
         column_profiles = profile_dataframe(df_staged)
 
         # 6. Save metadata to catalog DB
         created_dt = datetime.utcnow()
+        if new_watermark is not None and (pd.isna(new_watermark) or str(new_watermark).strip().lower() in ("nat", "nan", "none", "<na>", "null", "")):
+            new_watermark = None
+        elif new_watermark is not None:
+            new_watermark = str(new_watermark)
         dataset_info = {
             "id": dataset_id,
             "flow_id": request.flow_id,
@@ -48,7 +68,12 @@ class StagingService:
             "description": request.description or "",
             "source_type": request.source_request.source_type.value if hasattr(request.source_request.source_type, "value") else str(request.source_request.source_type),
             "source_summary": connector.get_source_summary(),
-            "row_count": len(df_staged),
+            "sync_mode": sync_mode,
+            "watermark_column": watermark_col,
+            "last_watermark_value": new_watermark,
+            "last_synced_at": created_dt,
+            "primary_key": pk,
+            "row_count": total_row_count,
             "column_count": len(df_staged.columns),
             "storage_path": storage_path,
             "storage_format": storage_format,
@@ -57,6 +82,19 @@ class StagingService:
             "file_size_bytes": file_size
         }
         CatalogDB.save_staged_dataset(dataset_info)
+
+        # 7. Update flow watermark & source_request if linked
+        if request.flow_id:
+            flow_updates = {
+                "sync_mode": sync_mode,
+                "watermark_column": watermark_col,
+                "primary_key": pk,
+                "source_request": request.source_request.dict() if hasattr(request.source_request, "dict") else request.source_request
+            }
+            if new_watermark:
+                flow_updates["last_watermark_value"] = new_watermark
+                flow_updates["last_synced_at"] = created_dt
+            CatalogDB.update_flow(request.flow_id, flow_updates)
 
         return StagedDatasetInfo(**dataset_info)
 
@@ -71,6 +109,11 @@ class StagingService:
                 description=r["description"],
                 source_type=r["source_type"],
                 source_summary=r["source_summary"],
+                sync_mode=r.get("sync_mode", "full"),
+                watermark_column=r.get("watermark_column", "aud_last_update"),
+                last_watermark_value=r.get("last_watermark_value"),
+                last_synced_at=datetime.fromisoformat(r["last_synced_at"]) if isinstance(r.get("last_synced_at"), str) else r.get("last_synced_at"),
+                primary_key=r.get("primary_key"),
                 row_count=r["row_count"],
                 column_count=r["column_count"],
                 storage_path=r["storage_path"],
@@ -94,6 +137,11 @@ class StagingService:
             description=r["description"],
             source_type=r["source_type"],
             source_summary=r["source_summary"],
+            sync_mode=r.get("sync_mode", "full"),
+            watermark_column=r.get("watermark_column", "aud_last_update"),
+            last_watermark_value=r.get("last_watermark_value"),
+            last_synced_at=datetime.fromisoformat(r["last_synced_at"]) if isinstance(r.get("last_synced_at"), str) else r.get("last_synced_at"),
+            primary_key=r.get("primary_key"),
             row_count=r["row_count"],
             column_count=r["column_count"],
             storage_path=r["storage_path"],
