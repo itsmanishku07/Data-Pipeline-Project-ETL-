@@ -14,7 +14,9 @@ import {
   Server,
   Trash2,
   Key,
-  Save
+  Save,
+  HardDrive,
+  Check
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
 import { ConfirmationModal } from '../common/ConfirmationModal';
@@ -22,7 +24,7 @@ import { useTimezone } from '../../context/TimezoneContext';
 
 export const HistoryAuditView = () => {
   const { formatDateTime, formatTime, timezoneShort } = useTimezone();
-  const [activeTab, setActiveTab] = useState('audit'); // 'audit', 'ingestion', 'transform', 'credentials', 'schema'
+  const [activeTab, setActiveTab] = useState('audit'); // 'audit', 'ingestion', 'transform', 'credentials'
   const [summary, setSummary] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [ingestionLogs, setIngestionLogs] = useState([]);
@@ -31,12 +33,18 @@ export const HistoryAuditView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLog, setSelectedLog] = useState(null);
 
-  // Metadata Credentials Form State
+  // Storage Engine State
+  const [selectedEngine, setSelectedEngine] = useState('mysql'); // 'mysql' | 'sqlite'
+  const [activeServerEngine, setActiveServerEngine] = useState(null);
   const [dbHost, setDbHost] = useState('localhost');
   const [dbPort, setDbPort] = useState(3306);
   const [dbUser, setDbUser] = useState('root');
   const [dbPassword, setDbPassword] = useState('');
   const [dbDatabase, setDbDatabase] = useState('dataflow_metadata');
+  const [sqlitePath, setSqlitePath] = useState('');
+  
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [savingCreds, setSavingCreds] = useState(false);
   const [credsStatus, setCredsStatus] = useState(null);
 
@@ -55,10 +63,13 @@ export const HistoryAuditView = () => {
       setIngestionLogs(ingRes);
       setTransformLogs(txRes);
       if (credRes) {
+        setSelectedEngine(credRes.active_engine || (credRes.use_mysql ? 'mysql' : 'sqlite'));
+        setActiveServerEngine(credRes.active_engine || 'sqlite');
         setDbHost(credRes.host || 'localhost');
         setDbPort(credRes.port || 3306);
         setDbUser(credRes.user || 'root');
         setDbDatabase(credRes.database || 'dataflow_metadata');
+        setSqlitePath(credRes.sqlite_path || 'catalog_fallback.db');
       }
     } catch (err) {
       console.error('Failed to load history data', err);
@@ -71,24 +82,49 @@ export const HistoryAuditView = () => {
     fetchAllData();
   }, []);
 
-  const handleSaveCredentials = async (e) => {
-    e.preventDefault();
-    setSavingCreds(true);
-    setCredsStatus(null);
+  const handleTestMySQL = async () => {
+    setTestingConnection(true);
+    setTestResult(null);
     try {
-      const res = await DataFlowAPI.updateMetadataCredentials({
+      const res = await DataFlowAPI.testMySQLCredentials({
         host: dbHost.trim(),
         port: Number(dbPort),
         user: dbUser.trim(),
         password: dbPassword,
         database: dbDatabase.trim(),
       });
+      setTestResult(res);
+    } catch (err) {
+      setTestResult({
+        success: false,
+        message: err?.response?.data?.detail || err.message || 'MySQL test connection failed',
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSaveCredentials = async (e) => {
+    if (e) e.preventDefault();
+    setSavingCreds(true);
+    setCredsStatus(null);
+    try {
+      const payload = {
+        active_engine: selectedEngine,
+        host: dbHost.trim(),
+        port: Number(dbPort),
+        user: dbUser.trim(),
+        password: dbPassword,
+        database: dbDatabase.trim(),
+      };
+      const res = await DataFlowAPI.updateMetadataCredentials(payload);
       setCredsStatus(res);
+      setActiveServerEngine(res.active_engine);
       fetchAllData();
     } catch (err) {
       setCredsStatus({
         success: false,
-        message: err?.response?.data?.detail || err.message || 'Failed to update MySQL metadata credentials',
+        message: err?.response?.data?.detail || err.message || 'Failed to update metadata store configuration',
       });
     } finally {
       setSavingCreds(false);
@@ -247,13 +283,14 @@ export const HistoryAuditView = () => {
           <button
             type="button"
             onClick={() => setActiveTab('credentials')}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center space-x-1.5 ${
               activeTab === 'credentials'
                 ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
                 : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
             }`}
           >
-            MySQL Database Store
+            <Database className="w-3.5 h-3.5" />
+            <span>Storage Engine & DB</span>
           </button>
         </div>
 
@@ -264,6 +301,7 @@ export const HistoryAuditView = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search audit trail..."
               className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-52 font-sans"
             />
           </div>
@@ -379,107 +417,279 @@ export const HistoryAuditView = () => {
         </div>
       )}
 
-      {/* 2. MySQL Metadata Credentials Config View */}
+      {/* 2. Metadata Storage Engine & Credentials Config View */}
       {activeTab === 'credentials' && (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-4 transition-colors max-w-2xl">
-          <div className="flex items-center space-x-2">
-            <Key className="w-4 h-4 text-zinc-500" />
-            <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
-              MySQL Metadata Store Connection Credentials
-            </h4>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 shadow-xs space-y-4 transition-colors max-w-3xl">
+          
+          {/* Active Engine Status Banner */}
+          <div className="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-2.5">
+              <div className={`w-3 h-3 rounded-full ${activeServerEngine === 'mysql' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`} />
+              <div>
+                <span className="text-[10px] font-mono uppercase text-zinc-400 block">Active Storage Engine</span>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  {activeServerEngine === 'mysql' ? (
+                    <>MySQL Database Engine (<span className="font-mono text-emerald-600 dark:text-emerald-400">{dbHost}:{dbPort}/{dbDatabase}</span>)</>
+                  ) : (
+                    <>SQLite Embedded Engine (<span className="font-mono text-blue-600 dark:text-blue-400">Local Catalog DB</span>)</>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <span className={`self-start sm:self-auto px-2.5 py-1 rounded text-[10px] font-mono font-semibold uppercase border ${
+              activeServerEngine === 'mysql'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40'
+                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/40'
+            }`}>
+              {activeServerEngine === 'mysql' ? 'MySQL Active' : 'SQLite Active'}
+            </span>
           </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Configure your MySQL server credentials to persist all pipeline lineage, staged dataset catalogs, and audit logs.
-          </p>
 
-          <form onSubmit={handleSaveCredentials} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">MySQL Host *</label>
-                <input
-                  type="text"
-                  required
-                  value={dbHost}
-                  onChange={(e) => setDbHost(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                />
-              </div>
+          <div>
+            <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
+              Select Storage Environment
+            </h4>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Switch where DataFlow Studio stores staged catalog tables, pipelines, transformation history, and flow definitions.
+            </p>
+          </div>
 
+          {/* Engine Choice Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* MySQL Card */}
+            <button
+              type="button"
+              onClick={() => setSelectedEngine('mysql')}
+              className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                selectedEngine === 'mysql'
+                  ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-50/80 dark:bg-zinc-950/80 shadow-xs ring-1 ring-zinc-900 dark:ring-zinc-100'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400'
+              }`}
+            >
               <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
-                <input
-                  type="number"
-                  required
-                  value={dbPort}
-                  onChange={(e) => setDbPort(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Server className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">MySQL Database</span>
+                  </div>
+                  {selectedEngine === 'mysql' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                  Networked MySQL database server. Persists catalog tables, multi-tenant workflows, and audit histories.
+                </p>
               </div>
-            </div>
+              <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                <span>Default: localhost:3306</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">Full ACID</span>
+              </div>
+            </button>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* SQLite Card */}
+            <button
+              type="button"
+              onClick={() => setSelectedEngine('sqlite')}
+              className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                selectedEngine === 'sqlite'
+                  ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-50/80 dark:bg-zinc-950/80 shadow-xs ring-1 ring-zinc-900 dark:ring-zinc-100'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400'
+              }`}
+            >
               <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={dbDatabase}
-                  onChange={(e) => setDbDatabase(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">SQLite Embedded</span>
+                  </div>
+                  {selectedEngine === 'sqlite' && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                  Embedded single-file database. Zero setup required; stores tables locally in a disk file.
+                </p>
+              </div>
+              <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                <span>File: catalog_fallback.db</span>
+                <span className="font-semibold text-blue-600 dark:text-blue-400">Zero Setup</span>
+              </div>
+            </button>
+          </div>
+
+          {/* MySQL Configuration Form */}
+          {selectedEngine === 'mysql' && (
+            <form onSubmit={handleSaveCredentials} className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between pb-1 border-b border-zinc-200 dark:border-zinc-800">
+                <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 flex items-center space-x-1.5">
+                  <Key className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>MySQL Connection Credentials</span>
+                </span>
+                <span className="text-[10px] font-mono text-zinc-400">Auto-creates database if missing</span>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username *</label>
-                <input
-                  type="text"
-                  required
-                  value={dbUser}
-                  onChange={(e) => setDbUser(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                />
-              </div>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">MySQL Host *</label>
+                  <input
+                    type="text"
+                    required
+                    value={dbHost}
+                    onChange={(e) => setDbHost(e.target.value)}
+                    placeholder="localhost"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
-              <input
-                type="password"
-                value={dbPassword}
-                onChange={(e) => setDbPassword(e.target.value)}
-                className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-              />
-            </div>
-
-            {credsStatus && (
-              <div className={`p-3 rounded-md border text-xs font-mono flex items-start space-x-2 ${
-                credsStatus.success
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
-                  : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900/40'
-              }`}>
-                {credsStatus.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                )}
                 <div>
-                  <p className="font-semibold">{credsStatus.success ? 'MySQL Connected' : 'MySQL Notice'}</p>
-                  <p className="text-[11px] opacity-90 mt-0.5">{credsStatus.message}</p>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
+                  <input
+                    type="number"
+                    required
+                    value={dbPort}
+                    onChange={(e) => setDbPort(e.target.value)}
+                    placeholder="3306"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
                 </div>
               </div>
-            )}
 
-            <div className="pt-2 flex justify-end">
-              <button
-                type="submit"
-                disabled={savingCreds}
-                className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{savingCreds ? 'Saving & Testing...' : 'Save & Connect MySQL Metadata'}</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={dbDatabase}
+                    onChange={(e) => setDbDatabase(e.target.value)}
+                    placeholder="dataflow_metadata"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username *</label>
+                  <input
+                    type="text"
+                    required
+                    value={dbUser}
+                    onChange={(e) => setDbUser(e.target.value)}
+                    placeholder="root"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
+                <input
+                  type="password"
+                  value={dbPassword}
+                  onChange={(e) => setDbPassword(e.target.value)}
+                  placeholder="Enter MySQL password (e.g. 3435)"
+                  className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                />
+              </div>
+
+              {/* Real-time Test Feedback */}
+              {testResult && (
+                <div className={`p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 ${
+                  testResult.success
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                    : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/40'
+                }`}>
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className="font-semibold">{testResult.success ? 'MySQL Connected' : 'MySQL Connection Failed'}</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">{testResult.message}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Save Status Feedback */}
+              {credsStatus && (
+                <div className={`p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 ${
+                  credsStatus.success
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900/40'
+                }`}>
+                  {credsStatus.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className="font-semibold">{credsStatus.success ? 'MySQL Active' : 'Notice'}</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">{credsStatus.message}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleTestMySQL}
+                  disabled={testingConnection}
+                  className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium flex items-center space-x-1.5 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+                  <span>{testingConnection ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={savingCreds}
+                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savingCreds ? 'Saving & Connecting...' : 'Save & Connect MySQL'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* SQLite Form & Activation */}
+          {selectedEngine === 'sqlite' && (
+            <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 space-y-3 animate-fadeIn">
+              <div className="flex items-center space-x-2 text-zinc-900 dark:text-zinc-100 font-semibold text-xs">
+                <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Embedded SQLite Catalog Configuration</span>
+              </div>
+
+              <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                DataFlow Studio will maintain all staged tables, schema metadata, and audit events in a local SQLite file. No external database server is required.
+              </p>
+
+              <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 truncate">
+                <span className="text-zinc-400 block text-[10px] uppercase">Database File Path:</span>
+                <span className="text-blue-600 dark:text-blue-400">{sqlitePath || 'Local catalog fallback DB'}</span>
+              </div>
+
+              {credsStatus && (
+                <div className="p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/40">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">SQLite Active</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">{credsStatus.message}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveCredentials}
+                  disabled={savingCreds}
+                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savingCreds ? 'Activating...' : 'Activate SQLite Storage'}</span>
+                </button>
+              </div>
             </div>
-          </form>
+          )}
+
         </div>
       )}
 
@@ -578,6 +788,7 @@ export const HistoryAuditView = () => {
           </div>
         </div>
       )}
+
       {/* Clear All History Confirmation Modal */}
       <ConfirmationModal
         isOpen={clearConfirmModal.isOpen}

@@ -77,15 +77,14 @@ const navItems = [
 export const Sidebar = ({ 
   currentStep, 
   onStepClick, 
-  maxStepReached = 6, 
+  maxStepReached = 7, 
   isDark, 
   onToggleTheme,
   stagedCount = 0,
   isOpen = false,
   onClose,
   isHidden = false,
-  onToggleHide,
-  onOpenSettings
+  onToggleHide
 }) => {
   const handleItemClick = (id) => {
     onStepClick(id);
@@ -131,19 +130,7 @@ export const Sidebar = ({
               </div>
             </div>
 
-            <div className="flex items-center space-x-0.5">
-              {/* Settings Button */}
-              {onOpenSettings && (
-                <button
-                  type="button"
-                  onClick={onOpenSettings}
-                  className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  title="Studio Settings & Timezone"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
-              )}
-
+            <div className="flex items-center space-x-1">
               {/* Theme Switcher */}
               <button
                 type="button"
@@ -195,7 +182,7 @@ export const Sidebar = ({
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentStep === item.id;
-              const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6;
+              const isAccessible = item.id === 0 || item.id === 6 || item.id === 7 || item.id <= Math.max(currentStep, maxStepReached);
 
               return (
                 <button
@@ -240,19 +227,21 @@ export const Sidebar = ({
             })}
           </div>
 
-          {/* Sidebar Footer Settings Link */}
-          {onOpenSettings && (
-            <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0">
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-md text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                <span>Preferences & Timezone</span>
-              </button>
-            </div>
-          )}
+          {/* Sidebar Footer: ONLY option to open Settings */}
+          <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleItemClick(8)}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                currentStep === 8
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100'
+              }`}
+            >
+              <Settings className="w-4 h-4 shrink-0" />
+              <span>Settings</span>
+            </button>
+          </div>
         </div>
       </aside>
     </>

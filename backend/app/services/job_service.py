@@ -402,7 +402,19 @@ class JobService:
             # 3. Stage Output to MySQL Staging Table if requested (zero parquet disk files)
             output_dataset_id = None
             if request.stage_output:
-                output_dataset_id = f"stg_curated_{uuid.uuid4().hex[:8]}"
+                # Reuse existing staged dataset for this flow if the output dataset name matches
+                existing_datasets = CatalogDB.list_staged_datasets(flow_id=resolved_flow_id)
+                matched_existing = next(
+                    (d for d in existing_datasets if d.get("name") == request.output_dataset_name),
+                    None
+                )
+
+                if matched_existing:
+                    output_dataset_id = matched_existing["id"]
+                    logs.append(f"Updating existing curated Lakehouse dataset '{request.output_dataset_name}' (ID: {output_dataset_id})...")
+                else:
+                    output_dataset_id = f"stg_curated_{uuid.uuid4().hex[:8]}"
+
                 out_path, out_fmt, file_size, total_curated_rows, out_wm = DataStoreEngine.save_staged_dataframe(
                     dataset_id=output_dataset_id,
                     df=df_out,
@@ -414,7 +426,7 @@ class JobService:
                 now_dt = datetime.utcnow()
                 staged_info = {
                     "id": output_dataset_id,
-                    "flow_id": request.flow_id,
+                    "flow_id": resolved_flow_id,
                     "name": request.output_dataset_name,
                     "description": request.output_description or f"Transformed from {meta['name']}",
                     "source_type": "transformed_pipeline",

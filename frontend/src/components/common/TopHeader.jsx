@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, GitBranch, Menu, PanelLeftOpen, Clock, Settings, Globe } from 'lucide-react';
+import { ChevronRight, GitBranch, Menu, PanelLeftOpen, Clock, Globe } from 'lucide-react';
 import { useTimezone } from '../../context/TimezoneContext';
 
 const sectionTitles = {
@@ -11,6 +11,7 @@ const sectionTitles = {
   5: { title: 'Pipeline DAG Execution', subtitle: 'Compile and run the end-to-end transformation job and export golden files' },
   6: { title: 'Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
   7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Cloud Storage or Lakehouse' },
+  8: { title: 'Studio Settings', subtitle: 'Configure metadata storage engine (MySQL / SQLite), application timezone, and display preferences' },
 };
 
 export const TopHeader = ({ 
@@ -21,8 +22,7 @@ export const TopHeader = ({
   activeDatasetName,
   onOpenMobileMenu,
   isSidebarHidden = false,
-  onToggleSidebar,
-  onOpenSettings
+  onToggleSidebar
 }) => {
   const info = sectionTitles[currentStep] || sectionTitles[1];
   const { currentTime, formatTime, timezoneShort, effectiveTimezone } = useTimezone();
@@ -67,7 +67,7 @@ export const TopHeader = ({
 
       <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
         {/* Flow Selector Dropdown */}
-        {flows.length > 0 && (
+        {flows.length > 0 && currentStep !== 8 && (
           <div className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs">
             <GitBranch className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
             <span className="hidden md:inline text-zinc-400 dark:text-zinc-500 font-medium">Flow:</span>
@@ -97,31 +97,19 @@ export const TopHeader = ({
           </div>
         )}
 
-        {/* LIVE TIMEZONE CLOCK PILL */}
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="flex items-center space-x-1.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs transition-colors group cursor-pointer"
-          title={`Active Timezone: ${effectiveTimezone}. Click to configure preferences.`}
+        {/* LIVE TIMEZONE CLOCK PILL (Informational Badge) */}
+        <div
+          className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs select-none"
+          title={`Active Timezone: ${effectiveTimezone}`}
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
           <span className="font-mono text-xs font-medium text-zinc-800 dark:text-zinc-200">
             {formatTime(currentTime)}
           </span>
-          <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold group-hover:bg-zinc-300 dark:group-hover:bg-zinc-700 transition-colors">
+          <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold">
             {timezoneShort}
           </span>
-        </button>
-
-        {/* SETTINGS GEAR BUTTON */}
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="p-1.5 rounded-md bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 transition-colors shadow-xs"
-          title="Studio Settings (Timezone, Clock, Appearance)"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
+        </div>
       </div>
     </header>
   );

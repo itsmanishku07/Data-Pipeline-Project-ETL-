@@ -175,12 +175,13 @@ export const PipelineExecutionView = ({
 
   // Update pipeline names whenever effectiveDataset changes
   useEffect(() => {
-    const dsName = effectiveDataset?.name || currentFlow?.name || 'data';
-    setPipelineName(`${dsName}_pipeline`);
-    setOutputDatasetName(`curated_${dsName}`);
-    setDbTable(`${dsName}_gold`);
-    setS3Key(`curated/${dsName}.parquet`);
-    setAzurePath(`${dsName}.parquet`);
+    const rawName = effectiveDataset?.name || currentFlow?.name || 'data';
+    const cleanBaseName = rawName.replace(/^(curated_|stg_)+/, '');
+    setPipelineName(`${cleanBaseName}_pipeline`);
+    setOutputDatasetName(`curated_${cleanBaseName}`);
+    setDbTable(`${cleanBaseName}_gold`);
+    setS3Key(`curated/${cleanBaseName}.parquet`);
+    setAzurePath(`${cleanBaseName}.parquet`);
   }, [effectiveDataset, currentFlow]);
 
   useEffect(() => {

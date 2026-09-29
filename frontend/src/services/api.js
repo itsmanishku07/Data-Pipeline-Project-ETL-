@@ -345,6 +345,11 @@ export const DataFlowAPI = {
     });
   },
 
+  testMySQLCredentials: async (creds) => {
+    const res = await api.post('/history/test-mysql', creds);
+    return res.data;
+  },
+
   updateMetadataCredentials: async (creds) => {
     const res = await api.post('/history/credentials', creds);
     invalidateDataFlowCache();

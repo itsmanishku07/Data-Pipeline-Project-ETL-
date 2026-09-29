@@ -17,7 +17,13 @@ import {
   Table as TableIcon,
   Info,
   Calendar,
-  FileCode
+  FileCode,
+  LayoutGrid,
+  ListFilter,
+  Boxes,
+  Zap,
+  Tag,
+  Clock
 } from 'lucide-react';
 import { DataFlowAPI } from '../../services/api';
 import { DataGrid } from '../common/DataGrid';
@@ -37,6 +43,7 @@ export const StagingAreaView = ({
   const [datasets, setDatasets] = useState(allDatasets || []);
   const [activeDataset, setActiveDataset] = useState(null);
   const [selectedFlowFilter, setSelectedFlowFilter] = useState('all');
+  const [viewLayout, setViewLayout] = useState('flow_grouped'); // 'flow_grouped' | 'grid'
   const [activeTab, setActiveTab] = useState('preview'); // 'preview', 'schema', 'lineage'
   const [previewData, setPreviewData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -162,10 +169,108 @@ export const StagingAreaView = ({
     return datasets.filter((d) => d.flow_id === flowId).length;
   };
 
+  // Helper: Categorize dataset as curated pipeline output vs raw ingested source
+  const isCuratedDataset = (ds) => ds.source_type === 'transformed_pipeline';
+
+  // Render individual dataset card
+  const renderDatasetCard = (ds) => {
+    const flowObj = flows.find((f) => f.id === ds.flow_id);
+    const isCurated = isCuratedDataset(ds);
+
+    return (
+      <div
+        key={ds.id}
+        onClick={() => handleSelectStage(ds)}
+        className={`border rounded-lg p-4 shadow-xs transition-all cursor-pointer flex flex-col justify-between group space-y-3.5 ${
+          isCurated
+            ? 'bg-purple-50/20 dark:bg-purple-950/10 border-purple-200/80 dark:border-purple-900/40 hover:border-purple-400 dark:hover:border-purple-600'
+            : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600'
+        }`}
+      >
+        <div>
+          {/* Top Badges: Flow Badge & Source / Curated Type */}
+          <div className="flex items-center justify-between gap-1 mb-2.5">
+            {flowObj ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 truncate max-w-[160px]">
+                <GitBranch className="w-3 h-3 text-zinc-400 shrink-0" />
+                <span className="truncate">{flowObj.name}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                General
+              </span>
+            )}
+
+            <div className="flex items-center space-x-1.5 shrink-0">
+              {isCurated ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-purple-100/80 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-900/50">
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span>CURATED OUTPUT</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40 uppercase">
+                  <Database className="w-3 h-3 text-emerald-500" />
+                  <span>SOURCE ({ds.source_type})</span>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={(e) => promptDeleteStage(ds.id, ds.name, e)}
+                className="text-zinc-400 hover:text-red-600 p-0.5 transition-colors"
+                title="Delete staged dataset"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 min-w-0 pr-1">
+            <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 border ${
+              isCurated
+                ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+            }`}>
+              {isCurated ? <Sparkles className="w-4 h-4 text-amber-500" /> : <HardDrive className="w-4 h-4" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate block">
+                {ds.name}
+              </span>
+              <span className="text-[10px] font-mono text-zinc-400 block truncate">
+                {isCurated ? '⚡ Curated PySpark Output' : '📥 Raw Ingested Lakehouse Table'}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 line-clamp-2">
+            {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
+          </p>
+        </div>
+
+        <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between">
+          <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 space-x-1.5">
+            <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{ds.row_count.toLocaleString()}</strong> rows
+            <span>•</span>
+            <span>{ds.column_count} cols</span>
+          </div>
+
+          <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
+            <span>Inspect</span>
+            <ArrowRight className="w-3 h-3" />
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   // ==========================================
   // LEVEL 1: CLEAN SAVED STAGES GALLERY
   // ==========================================
   if (!activeDataset) {
+    const selectedFlowObj = flows.find((f) => f.id === selectedFlowFilter);
+    const flowSourceDatasets = filteredStages.filter((d) => !isCuratedDataset(d));
+    const flowCuratedDatasets = filteredStages.filter((d) => isCuratedDataset(d));
+
     return (
       <div className="space-y-5 animate-fadeIn">
         {/* Top Header & Search Bar */}
@@ -173,7 +278,7 @@ export const StagingAreaView = ({
           <div className="flex items-center space-x-2.5">
             <Layers className="w-4 h-4 text-zinc-500 shrink-0" />
             <div>
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Staging Repository</h3>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Lakehouse Staging Repository</h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                 {datasets.length} staged dataset{datasets.length === 1 ? '' : 's'} across {flows.length} data flows
               </p>
@@ -181,6 +286,38 @@ export const StagingAreaView = ({
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:space-x-2">
+            {/* View Mode Switcher for All Flows */}
+            {selectedFlowFilter === 'all' && datasets.length > 0 && (
+              <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewLayout('flow_grouped')}
+                  className={`px-2.5 py-1 rounded flex items-center space-x-1 font-medium transition-colors ${
+                    viewLayout === 'flow_grouped'
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  }`}
+                  title="Group datasets by Flow"
+                >
+                  <Boxes className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Grouped by Flow</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewLayout('grid')}
+                  className={`px-2.5 py-1 rounded flex items-center space-x-1 font-medium transition-colors ${
+                    viewLayout === 'grid'
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  }`}
+                  title="Show flat grid"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Flat Grid</span>
+                </button>
+              </div>
+            )}
+
             {datasets.length > 0 && (
               <div className="relative w-full sm:w-auto">
                 <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -188,6 +325,7 @@ export const StagingAreaView = ({
                   type="text"
                   value={searchStage}
                   onChange={(e) => setSearchStage(e.target.value)}
+                  placeholder="Search stages or flows..."
                   className="pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 w-full sm:w-52 font-sans"
                 />
               </div>
@@ -259,12 +397,147 @@ export const StagingAreaView = ({
           </div>
         )}
 
-        {/* Saved Stages Cards Grid */}
-        {filteredStages.length === 0 ? (
+        {/* SELECTED FLOW HIGHLIGHT BANNER */}
+        {selectedFlowFilter !== 'all' && selectedFlowObj && (
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                  {selectedFlowObj.category || 'General'}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded uppercase font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400">
+                  Sync: {selectedFlowObj.sync_mode || 'full'}
+                </span>
+                {selectedFlowObj.primary_key && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400">
+                    PK: {selectedFlowObj.primary_key}
+                  </span>
+                )}
+              </div>
+              <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center space-x-2">
+                <span>{selectedFlowObj.name}</span>
+                <span className="text-xs font-normal text-zinc-500">
+                  ({filteredStages.length} total dataset{filteredStages.length === 1 ? '' : 's'} staged)
+                </span>
+              </h4>
+              {selectedFlowObj.description && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{selectedFlowObj.description}</p>
+              )}
+            </div>
+
+            {selectedFlowObj.last_watermark_value && (
+              <div className="p-2.5 rounded-md bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 text-xs font-mono shrink-0">
+                <span className="text-[10px] uppercase text-amber-700 dark:text-amber-400 font-semibold block">
+                  Current Watermark
+                </span>
+                <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate max-w-[200px] block">
+                  {selectedFlowObj.last_watermark_value}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 1. FLOW DEDICATED VIEW: SEPARATED INTO SOURCE VS CURATED OUTPUTS */}
+        {selectedFlowFilter !== 'all' && filteredStages.length > 0 && (
+          <div className="space-y-6">
+            {/* A. Ingested Source Datasets */}
+            {flowSourceDatasets.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">
+                  <Database className="w-4 h-4 text-emerald-600" />
+                  <span>1. Ingested Source Datasets ({flowSourceDatasets.length})</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {flowSourceDatasets.map((ds) => renderDatasetCard(ds))}
+                </div>
+              </div>
+            )}
+
+            {/* B. Transformed / Curated Pipeline Outputs */}
+            {flowCuratedDatasets.length > 0 && (
+              <div className="space-y-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center space-x-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>2. Transformed & Curated Outputs ({flowCuratedDatasets.length})</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {flowCuratedDatasets.map((ds) => renderDatasetCard(ds))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 2. ALL FLOWS GROUPED BY FLOW VIEW */}
+        {selectedFlowFilter === 'all' && viewLayout === 'flow_grouped' && filteredStages.length > 0 && (
+          <div className="space-y-6">
+            {flows.map((flow) => {
+              const flowDatasets = filteredStages.filter((d) => d.flow_id === flow.id);
+              if (flowDatasets.length === 0) return null;
+              const sourceSets = flowDatasets.filter((d) => !isCuratedDataset(d));
+              const curatedSets = flowDatasets.filter((d) => isCuratedDataset(d));
+
+              return (
+                <div 
+                  key={flow.id}
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 shadow-xs space-y-4 transition-colors"
+                >
+                  {/* Flow Group Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="w-7 h-7 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center font-bold text-xs">
+                        <GitBranch className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{flow.name}</h4>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                            {flow.category || 'General'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                          {sourceSets.length} source table{sourceSets.length === 1 ? '' : 's'} • {curatedSets.length} curated output{curatedSets.length === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFlowFilter(flow.id);
+                        onSelectFlow && onSelectFlow(flow.id);
+                      }}
+                      className="text-xs text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white font-medium flex items-center space-x-1"
+                    >
+                      <span>Focus Flow</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Flow Datasets Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    {flowDatasets.map((ds) => renderDatasetCard(ds))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 3. ALL FLOWS FLAT GRID VIEW */}
+        {selectedFlowFilter === 'all' && viewLayout === 'grid' && filteredStages.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {filteredStages.map((ds) => renderDatasetCard(ds))}
+          </div>
+        )}
+
+        {/* EMPTY STATE */}
+        {filteredStages.length === 0 && (
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-12 text-center text-zinc-500 dark:text-zinc-400 text-xs space-y-3">
             <FolderOpen className="w-8 h-8 text-zinc-400 mx-auto mb-1" />
             <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-              {datasets.length === 0 ? 'No Staged Datasets Yet' : 'No Datasets In This Flow'}
+              {datasets.length === 0 ? 'No Staged Datasets Yet' : 'No Datasets Matching Filter'}
             </h3>
             <p className="max-w-sm mx-auto text-zinc-400">
               {datasets.length === 0
@@ -279,75 +552,6 @@ export const StagingAreaView = ({
               <Plus className="w-3.5 h-3.5" />
               <span>Connect & Stage Data</span>
             </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredStages.map((ds) => {
-              const flowObj = flows.find((f) => f.id === ds.flow_id);
-              return (
-                <div
-                  key={ds.id}
-                  onClick={() => handleSelectStage(ds)}
-                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-lg p-4 shadow-xs transition-colors cursor-pointer flex flex-col justify-between group space-y-3.5"
-                >
-                  <div>
-                    {/* Top Badges: Flow Badge & Source Type */}
-                    <div className="flex items-center justify-between gap-1 mb-2">
-                      {flowObj ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 truncate max-w-[170px]">
-                          <GitBranch className="w-3 h-3 text-zinc-400 shrink-0" />
-                          <span className="truncate">{flowObj.name}</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
-                          General
-                        </span>
-                      )}
-
-                      <div className="flex items-center space-x-1 shrink-0">
-                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
-                          {ds.source_type}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => promptDeleteStage(ds.id, ds.name, e)}
-                          className="text-zinc-400 hover:text-red-600 p-0.5 transition-colors"
-                          title="Delete staged dataset"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2 min-w-0 pr-1">
-                      <div className="w-6 h-6 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
-                        <HardDrive className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">
-                        {ds.name}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 line-clamp-2">
-                      {ds.description || ds.source_summary || 'Staged Apache Parquet Lakehouse table.'}
-                    </p>
-                  </div>
-
-                  <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between">
-                    <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 space-x-1.5">
-                      <strong className="text-zinc-900 dark:text-zinc-100 font-medium">{ds.row_count.toLocaleString()}</strong> rows
-                      <span>•</span>
-                      <span>{ds.column_count} cols</span>
-                    </div>
-
-                    <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100 flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
-                      <span>Inspect</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         )}
 

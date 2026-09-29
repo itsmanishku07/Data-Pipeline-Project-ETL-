@@ -17,15 +17,30 @@ def get_db_connection():
 
         try:
             connect_args = {
-                "connect_timeout": 3,
-                "read_timeout": 5,
-                "write_timeout": 5,
+                "connect_timeout": 4,
+                "read_timeout": 6,
+                "write_timeout": 6,
                 "charset": "utf8mb4"
             }
             host = (settings.MYSQL_HOST or "").lower()
             if any(cloud_domain in host for cloud_domain in [".azure.com", ".amazonaws.com", ".psdb.cloud", ".aivencloud.com", ".digitalocean.com"]):
                 connect_args["ssl"] = {"ssl_disabled": False}
 
+            # 1. Ensure target database exists
+            try:
+                import urllib.parse
+                user = urllib.parse.quote_plus(settings.MYSQL_USER)
+                pwd = f":{urllib.parse.quote_plus(settings.MYSQL_PASSWORD)}" if settings.MYSQL_PASSWORD else ""
+                admin_url = f"mysql+pymysql://{user}{pwd}@{settings.MYSQL_HOST}:{settings.MYSQL_PORT}/"
+                admin_engine = create_engine(admin_url, connect_args=connect_args, pool_pre_ping=True)
+                with admin_engine.connect() as aconn:
+                    aconn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{settings.MYSQL_DATABASE}` DEFAULT CHARACTER SET utf8mb4;"))
+                    aconn.commit()
+                admin_engine.dispose()
+            except Exception:
+                pass
+
+            # 2. Connect to the specific metadata database
             engine = create_engine(
                 settings.get_mysql_metadata_url(),
                 connect_args=connect_args,

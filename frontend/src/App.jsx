@@ -9,7 +9,7 @@ import { TransformationStudioView } from './components/transform/TransformationS
 import { PipelineExecutionView } from './components/pipeline/PipelineExecutionView';
 import { HistoryAuditView } from './components/history/HistoryAuditView';
 import { ScheduledFlowsView } from './components/schedules/ScheduledFlowsView';
-import { SettingsModal } from './components/common/SettingsModal';
+import { SettingsView } from './components/settings/SettingsView';
 import { TimezoneProvider } from './context/TimezoneContext';
 import { DataFlowAPI } from './services/api';
 import { 
@@ -20,7 +20,8 @@ import {
   Sliders, 
   PlayCircle, 
   History,
-  CalendarClock 
+  CalendarClock,
+  Settings
 } from 'lucide-react';
 
 const mobileNavItems = [
@@ -32,6 +33,7 @@ const mobileNavItems = [
   { id: 5, label: 'Pipeline', icon: PlayCircle },
   { id: 6, label: 'History', icon: History },
   { id: 7, label: 'Cron', icon: CalendarClock },
+  { id: 8, label: 'Settings', icon: Settings },
 ];
 
 export const App = () => {
@@ -39,15 +41,14 @@ export const App = () => {
     try {
       const saved = localStorage.getItem('dataflow_current_step');
       const num = Number(saved);
-      return num >= 0 && num <= 7 ? num : 0;
+      return num >= 0 && num <= 8 ? num : 0;
     } catch {
       return 0;
     }
   });
 
-  const [maxStepReached, setMaxStepReached] = useState(7);
+  const [maxStepReached, setMaxStepReached] = useState(8);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Flows state with persistence
   const [flows, setFlows] = useState([]);
@@ -321,7 +322,7 @@ export const App = () => {
           onClose={() => setMobileMenuOpen(false)}
           isHidden={sidebarHidden}
           onToggleHide={toggleSidebar}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={() => goToStep(8)}
         />
 
         {/* Main Workspace Area */}
@@ -335,7 +336,7 @@ export const App = () => {
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             isSidebarHidden={sidebarHidden}
             onToggleSidebar={toggleSidebar}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => goToStep(8)}
           />
 
           <main className="flex-1 w-full px-4 sm:px-8 py-6 pb-24 md:pb-8">
@@ -434,6 +435,13 @@ export const App = () => {
                 onSelectFlow={handleFlowSelect}
               />
             )}
+
+            {currentStep === 8 && (
+              <SettingsView
+                isDark={isDark}
+                onToggleTheme={toggleTheme}
+              />
+            )}
           </main>
         </div>
 
@@ -442,7 +450,7 @@ export const App = () => {
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentStep === item.id;
-            const isAccessible = item.id === 0 || item.id <= Math.max(currentStep, maxStepReached) || item.id === 6 || item.id === 7;
+            const isAccessible = item.id === 0 || item.id === 6 || item.id === 7 || item.id === 8 || item.id <= Math.max(currentStep, maxStepReached);
 
             return (
               <button
@@ -450,7 +458,7 @@ export const App = () => {
                 type="button"
                 onClick={() => isAccessible && goToStep(item.id)}
                 disabled={!isAccessible}
-                className={`flex-1 min-w-[42px] max-w-[58px] flex flex-col items-center justify-center py-1 px-1 rounded-md transition-colors ${
+                className={`flex-1 min-w-[38px] max-w-[54px] flex flex-col items-center justify-center py-1 px-1 rounded-md transition-colors ${
                   isActive
                     ? 'text-zinc-900 dark:text-zinc-100 font-semibold'
                     : isAccessible
@@ -461,19 +469,11 @@ export const App = () => {
                 <div className={`p-1 rounded-md ${isActive ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}>
                   <Icon className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
+                <span className="text-[9px] leading-tight mt-0.5 tracking-tight truncate w-full text-center">{item.label}</span>
               </button>
             );
           })}
         </nav>
-
-        {/* Settings Preferences Modal */}
-        <SettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          isDark={isDark}
-          onToggleTheme={toggleTheme}
-        />
       </div>
     </TimezoneProvider>
   );
