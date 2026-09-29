@@ -5,15 +5,17 @@ import {
   Sun, 
   Moon, 
   Server, 
-  HardDrive, 
   Check, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
   RefreshCw, 
-  Save, 
   Zap, 
   Clock, 
-  Key 
+  ArrowRightLeft,
+  ShieldCheck,
+  FileCode2,
+  HardDrive
 } from 'lucide-react';
 import { useTimezone, TIMEZONE_OPTIONS } from '../../context/TimezoneContext';
 import { DataFlowAPI } from '../../services/api';
@@ -36,37 +38,51 @@ export const SettingsView = ({ isDark, onToggleTheme }) => {
   const [notification, setNotification] = useState(null);
 
   // Storage Engine State
-  const [selectedEngine, setSelectedEngine] = useState('mysql'); // 'mysql' | 'sqlite'
-  const [activeServerEngine, setActiveServerEngine] = useState(null);
-  const [dbHost, setDbHost] = useState('localhost');
-  const [dbPort, setDbPort] = useState(3306);
-  const [dbUser, setDbUser] = useState('root');
-  const [dbPassword, setDbPassword] = useState('');
-  const [dbDatabase, setDbDatabase] = useState('dataflow_metadata');
-  const [sqlitePath, setSqlitePath] = useState('');
-  
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-  const [savingEngine, setSavingEngine] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [activeServerEngine, setActiveServerEngine] = useState('mysql');
+  const [isConnected, setIsConnected] = useState(true);
+  const [mysqlInfo, setMysqlInfo] = useState({
+    host: 'localhost',
+    port: 3306,
+    user: 'root',
+    database: 'dataflow_metadata',
+    configured: true,
+    is_active: true
+  });
+  const [postgresInfo, setPostgresInfo] = useState({
+    host: 'localhost',
+    port: 5432,
+    user: 'postgres',
+    database: 'dataflow_metadata',
+    schema: 'public',
+    configured: false,
+    is_active: false
+  });
+  const [metadataSummary, setMetadataSummary] = useState(null);
+  const [switchingEngine, setSwitchingEngine] = useState(false);
+  const [switchFeedback, setSwitchFeedback] = useState(null);
 
   useEffect(() => {
     loadStorageCredentials();
   }, []);
 
   const loadStorageCredentials = async () => {
+    setLoadingConfig(true);
     try {
       const creds = await DataFlowAPI.getMetadataCredentials();
       if (creds) {
-        setSelectedEngine(creds.active_engine || (creds.use_mysql ? 'mysql' : 'sqlite'));
-        setActiveServerEngine(creds.active_engine || 'sqlite');
-        setDbHost(creds.host || 'localhost');
-        setDbPort(creds.port || 3306);
-        setDbUser(creds.user || 'root');
-        setDbDatabase(creds.database || 'dataflow_metadata');
-        setSqlitePath(creds.sqlite_path || 'catalog_fallback.db');
+        const engine = creds.active_engine === 'postgres' ? 'postgres' : 'mysql';
+        setActiveServerEngine(engine);
+        setIsConnected(creds.connected !== false);
+        if (creds.mysql) setMysqlInfo(creds.mysql);
+        if (creds.postgres) setPostgresInfo(creds.postgres);
+        if (creds.summary) setMetadataSummary(creds.summary);
       }
     } catch (err) {
       console.error('Failed to load storage engine config', err);
+      showNotification('Failed to fetch metadata configuration', 'error');
+    } finally {
+      setLoadingConfig(false);
     }
   };
 
@@ -75,47 +91,43 @@ export const SettingsView = ({ isDark, onToggleTheme }) => {
     setTimeout(() => setNotification(null), 3500);
   };
 
-  const handleTestMySQL = async () => {
-    setTestingConnection(true);
-    setTestResult(null);
+  const handleSwitchEngine = async (targetEngine) => {
+    if (targetEngine === activeServerEngine || switchingEngine) return;
+    setSwitchingEngine(true);
+    setSwitchFeedback(null);
     try {
-      const res = await DataFlowAPI.testMySQLCredentials({
-        host: dbHost.trim(),
-        port: Number(dbPort),
-        user: dbUser.trim(),
-        password: dbPassword,
-        database: dbDatabase.trim(),
+      const res = await DataFlowAPI.updateMetadataCredentials({
+        active_engine: targetEngine
       });
-      setTestResult(res);
+      if (res && res.success) {
+        setActiveServerEngine(res.active_engine);
+        setIsConnected(true);
+        if (res.mysql) setMysqlInfo(res.mysql);
+        if (res.postgres) setPostgresInfo(res.postgres);
+        if (res.summary) setMetadataSummary(res.summary);
+        setSwitchFeedback({
+          success: true,
+          message: res.message || `Switched to ${res.engine_label || targetEngine} successfully.`
+        });
+        showNotification(`Active database switched to ${res.engine_label || targetEngine}`);
+      } else {
+        setSwitchFeedback({
+          success: false,
+          message: res?.message || `Failed to switch to ${targetEngine}.`
+        });
+        showNotification(res?.message || 'Database switch aborted', 'error');
+      }
     } catch (err) {
-      setTestResult({
+      const errDetail = err?.response?.data?.detail || err.message || `Cannot connect to ${targetEngine}.`;
+      setSwitchFeedback({
         success: false,
-        message: err?.response?.data?.detail || err.message || 'MySQL test connection failed',
+        message: typeof errDetail === 'string' ? errDetail : JSON.stringify(errDetail)
       });
+      showNotification('Database switch failed', 'error');
     } finally {
-      setTestingConnection(false);
-    }
-  };
-
-  const handleSaveStorageEngine = async (e) => {
-    if (e) e.preventDefault();
-    setSavingEngine(true);
-    try {
-      const payload = {
-        active_engine: selectedEngine,
-        host: dbHost.trim(),
-        port: Number(dbPort),
-        user: dbUser.trim(),
-        password: dbPassword,
-        database: dbDatabase.trim(),
-      };
-      const res = await DataFlowAPI.updateMetadataCredentials(payload);
-      setActiveServerEngine(res.active_engine);
-      showNotification(res.message || 'Storage engine updated successfully');
-    } catch (err) {
-      showNotification(err?.response?.data?.detail || err.message || 'Failed to update storage engine', 'error');
-    } finally {
-      setSavingEngine(false);
+      setSwitchingEngine(false);
+      // Reload credentials to ensure fresh metadata state
+      await loadStorageCredentials();
     }
   };
 
@@ -155,7 +167,7 @@ export const SettingsView = ({ isDark, onToggleTheme }) => {
             Settings
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Manage your storage database engine, timezone, and appearance.
+            Manage your active metadata storage database, studio timezone, and interface theme.
           </p>
         </div>
 
@@ -206,204 +218,289 @@ export const SettingsView = ({ isDark, onToggleTheme }) => {
       {activeTab === 'storage' && (
         <div className="space-y-4">
           
-          {/* Active Engine Summary Pill */}
-          <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg flex items-center justify-between text-xs">
-            <div className="flex items-center space-x-2">
-              <span className={`w-2 h-2 rounded-full ${activeServerEngine === 'mysql' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
-              <span className="text-zinc-500 dark:text-zinc-400">Current Storage Backend:</span>
-              <strong className="text-zinc-900 dark:text-zinc-100 font-mono">
-                {activeServerEngine === 'mysql' ? `MySQL (${dbHost}:${dbPort}/${dbDatabase})` : 'SQLite (Local embedded catalog)'}
-              </strong>
-            </div>
-
-            <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium uppercase border ${
-              activeServerEngine === 'mysql'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40'
-                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/40'
-            }`}>
-              {activeServerEngine === 'mysql' ? 'MySQL Active' : 'SQLite Active'}
-            </span>
-          </div>
-
-          {/* Engine Choice Cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setSelectedEngine('mysql')}
-              className={`p-3.5 rounded-lg border text-left transition-colors flex items-start justify-between ${
-                selectedEngine === 'mysql'
-                  ? 'bg-zinc-50 dark:bg-zinc-900/90 border-zinc-900 dark:border-zinc-100 ring-1 ring-zinc-900 dark:ring-zinc-100'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
-              }`}
-            >
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <Server className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">MySQL Database</span>
-                </div>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  Networked SQL database for persistent enterprise storage.
-                </p>
-              </div>
-              {selectedEngine === 'mysql' && <Check className="w-4 h-4 text-zinc-900 dark:text-zinc-100 shrink-0 mt-0.5" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedEngine('sqlite')}
-              className={`p-3.5 rounded-lg border text-left transition-colors flex items-start justify-between ${
-                selectedEngine === 'sqlite'
-                  ? 'bg-zinc-50 dark:bg-zinc-900/90 border-zinc-900 dark:border-zinc-100 ring-1 ring-zinc-900 dark:ring-zinc-100'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
-              }`}
-            >
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">SQLite Embedded</span>
-                </div>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  Local file-based storage. Zero configuration required.
-                </p>
-              </div>
-              {selectedEngine === 'sqlite' && <Check className="w-4 h-4 text-zinc-900 dark:text-zinc-100 shrink-0 mt-0.5" />}
-            </button>
-          </div>
-
-          {/* MySQL Configuration Form */}
-          {selectedEngine === 'mysql' && (
-            <form onSubmit={handleSaveStorageEngine} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3.5">
-              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center space-x-2 border-b border-zinc-100 dark:border-zinc-800 pb-2">
-                <Key className="w-3.5 h-3.5 text-zinc-400" />
-                <span>MySQL Connection Parameters</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Host *</label>
-                  <input
-                    type="text"
-                    required
-                    value={dbHost}
-                    onChange={(e) => setDbHost(e.target.value)}
-                    placeholder="localhost"
-                    className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
-                  <input
-                    type="number"
-                    required
-                    value={dbPort}
-                    onChange={(e) => setDbPort(e.target.value)}
-                    placeholder="3306"
-                    className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={dbDatabase}
-                    onChange={(e) => setDbDatabase(e.target.value)}
-                    placeholder="dataflow_metadata"
-                    className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username *</label>
-                  <input
-                    type="text"
-                    required
-                    value={dbUser}
-                    onChange={(e) => setDbUser(e.target.value)}
-                    placeholder="root"
-                    className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={dbPassword}
-                  onChange={(e) => setDbPassword(e.target.value)}
-                  placeholder="Enter MySQL password"
-                  className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                />
-              </div>
-
-              {/* Test feedback */}
-              {testResult && (
-                <div className={`p-2.5 rounded-md border text-xs font-mono flex items-start space-x-2 ${
-                  testResult.success
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
-                    : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/40'
+          {/* Active Live Database Status & Realtime Metrics Banner */}
+          <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg space-y-3 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className={`p-2 rounded-lg ${
+                  activeServerEngine === 'mysql' 
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40' 
+                    : 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/40'
                 }`}>
-                  {testResult.success ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                  )}
-                  <p className="text-[11px]">{testResult.message}</p>
+                  {activeServerEngine === 'mysql' ? <Server className="w-5 h-5" /> : <Database className="w-5 h-5" />}
                 </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                      Active Metadata Database: {activeServerEngine === 'mysql' ? 'MySQL' : 'PostgreSQL'}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
+                      isConnected 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50'
+                        : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/50'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                      {isConnected ? 'ONLINE & ACTIVE' : 'DISCONNECTED'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    {activeServerEngine === 'mysql' 
+                      ? `${mysqlInfo.host}:${mysqlInfo.port} / ${mysqlInfo.database} (user: ${mysqlInfo.user})`
+                      : `${postgresInfo.host}:${postgresInfo.port} / ${postgresInfo.database} (schema: ${postgresInfo.schema}, user: ${postgresInfo.user})`}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadStorageCredentials}
+                disabled={loadingConfig}
+                className="self-start sm:self-auto px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingConfig ? 'animate-spin' : ''}`} />
+                <span>Refresh Status</span>
+              </button>
+            </div>
+
+            {/* Live Metrics fetched directly from the selected database */}
+            <div>
+              <span className="text-[10px] font-mono uppercase text-zinc-400 block mb-2">
+                Live Data Loaded From Selected Database:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80">
+                  <span className="text-[10px] text-zinc-400 block font-mono">FLOWS</span>
+                  <span className="text-sm font-bold font-mono text-zinc-900 dark:text-zinc-100">
+                    {metadataSummary ? metadataSummary.flows_count : '—'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80">
+                  <span className="text-[10px] text-zinc-400 block font-mono">STAGED DATASETS</span>
+                  <span className="text-sm font-bold font-mono text-zinc-900 dark:text-zinc-100">
+                    {metadataSummary ? metadataSummary.staged_datasets_count : '—'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80">
+                  <span className="text-[10px] text-zinc-400 block font-mono">PIPELINE JOBS</span>
+                  <span className="text-sm font-bold font-mono text-zinc-900 dark:text-zinc-100">
+                    {metadataSummary ? metadataSummary.pipeline_jobs_count : '—'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80">
+                  <span className="text-[10px] text-zinc-400 block font-mono">AUDIT LOGS</span>
+                  <span className="text-sm font-bold font-mono text-zinc-900 dark:text-zinc-100">
+                    {metadataSummary ? metadataSummary.audit_logs_count : '—'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-zinc-400 block font-mono">STAGED ROWS</span>
+                  <span className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                    {metadataSummary ? (metadataSummary.total_staged_rows || 0).toLocaleString() : '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Switch Feedback Banner */}
+          {switchFeedback && (
+            <div className={`p-3 rounded-lg border text-xs flex items-start space-x-2.5 animate-fadeIn ${
+              switchFeedback.success
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/50'
+                : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/50'
+            }`}>
+              {switchFeedback.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
               )}
-
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={handleTestMySQL}
-                  disabled={testingConnection}
-                  className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium flex items-center space-x-1.5 transition-colors"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
-                  <span>{testingConnection ? 'Testing...' : 'Test Connection'}</span>
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={savingEngine}
-                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{savingEngine ? 'Connecting...' : 'Save & Activate MySQL'}</span>
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* SQLite View */}
-          {selectedEngine === 'sqlite' && (
-            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
-              <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                All metadata, staged datasets, and history logs are persisted locally in a single-file SQLite database:
-              </p>
-              
-              <div className="p-2.5 rounded bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 break-all">
-                {sqlitePath || 'catalog_fallback.db'}
-              </div>
-
-              <div className="pt-1 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSaveStorageEngine}
-                  disabled={savingEngine}
-                  className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{savingEngine ? 'Activating...' : 'Activate SQLite Storage'}</span>
-                </button>
+              <div className="flex-1">
+                <span className="font-semibold block">
+                  {switchFeedback.success ? 'Database Switched Successfully' : 'Database Switch Aborted'}
+                </span>
+                <p className="text-[11px] mt-0.5 leading-relaxed font-mono">
+                  {switchFeedback.message}
+                </p>
+                {!switchFeedback.success && (
+                  <p className="text-[11px] mt-1 font-sans text-red-700 dark:text-red-300">
+                    Active database remains safely on <strong>{activeServerEngine === 'mysql' ? 'MySQL' : 'PostgreSQL'}</strong> without downtime or data corruption.
+                  </p>
+                )}
               </div>
             </div>
           )}
+
+          {/* Database Selection Cards */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                Available Storage Backends
+              </span>
+              <span className="text-[11px] text-zinc-400">
+                Credentials loaded securely from backend .env
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* MySQL Card */}
+              <div className={`p-4 rounded-lg border transition-all flex flex-col justify-between ${
+                activeServerEngine === 'mysql'
+                  ? 'bg-white dark:bg-zinc-900 border-emerald-500/80 dark:border-emerald-500/80 ring-1 ring-emerald-500/50 shadow-sm'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+              }`}>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/30">
+                        <Server className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">MySQL Database</h4>
+                        <span className="text-[10px] font-mono text-zinc-400">Driver: PyMySQL (Port 3306)</span>
+                      </div>
+                    </div>
+
+                    {activeServerEngine === 'mysql' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
+                        <Check className="w-3 h-3 mr-1" /> Active
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                        Available
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    Default high-performance metadata repository for workflows, schema mappings, staged rows, and audit history.
+                  </p>
+
+                  {/* Read-only Parameters from .env */}
+                  <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1.5 text-xs font-mono">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Host:Port</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{mysqlInfo.host}:{mysqlInfo.port}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Database</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{mysqlInfo.database}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">User</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{mysqlInfo.user}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Password</span>
+                      <span className="text-zinc-400 italic font-sans text-[10px]">Loaded from .env</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 mt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  {activeServerEngine === 'mysql' ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full py-2 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40 text-xs font-medium flex items-center justify-center space-x-1.5 cursor-default"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Currently Active Metadata Engine</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchEngine('mysql')}
+                      disabled={switchingEngine}
+                      className="w-full py-2 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center justify-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+                    >
+                      <ArrowRightLeft className={`w-3.5 h-3.5 ${switchingEngine ? 'animate-spin' : ''}`} />
+                      <span>{switchingEngine ? 'Switching to MySQL...' : 'Switch to MySQL'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* PostgreSQL Card */}
+              <div className={`p-4 rounded-lg border transition-all flex flex-col justify-between ${
+                activeServerEngine === 'postgres'
+                  ? 'bg-white dark:bg-zinc-900 border-indigo-500/80 dark:border-indigo-500/80 ring-1 ring-indigo-500/50 shadow-sm'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+              }`}>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30">
+                        <Database className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">PostgreSQL Database</h4>
+                        <span className="text-[10px] font-mono text-zinc-400">Driver: Psycopg2 (Port 5432)</span>
+                      </div>
+                    </div>
+
+                    {activeServerEngine === 'postgres' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800">
+                        <Check className="w-3 h-3 mr-1" /> Active
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                        Available
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    Enterprise object-relational store with ACID guarantees, schema namespaces, and JSON column support.
+                  </p>
+
+                  {/* Read-only Parameters from .env */}
+                  <div className="p-2.5 rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1.5 text-xs font-mono">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Host:Port</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{postgresInfo.host}:{postgresInfo.port}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Database</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{postgresInfo.database}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Schema / User</span>
+                      <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{postgresInfo.schema || 'public'} / {postgresInfo.user}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-zinc-400">Password</span>
+                      <span className="text-zinc-400 italic font-sans text-[10px]">Loaded from .env</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 mt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  {activeServerEngine === 'postgres' ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full py-2 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/40 text-xs font-medium flex items-center justify-center space-x-1.5 cursor-default"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Currently Active Metadata Engine</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchEngine('postgres')}
+                      disabled={switchingEngine}
+                      className="w-full py-2 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center justify-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+                    >
+                      <ArrowRightLeft className={`w-3.5 h-3.5 ${switchingEngine ? 'animate-spin' : ''}`} />
+                      <span>{switchingEngine ? 'Switching to PostgreSQL...' : 'Switch to PostgreSQL'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </div>
 
         </div>
       )}

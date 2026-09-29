@@ -11,7 +11,7 @@ const sectionTitles = {
   5: { title: 'Pipeline DAG Execution', subtitle: 'Compile and run the end-to-end transformation job and export golden files' },
   6: { title: 'Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
   7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Cloud Storage or Lakehouse' },
-  8: { title: 'Studio Settings', subtitle: 'Configure metadata storage engine (MySQL / SQLite), application timezone, and display preferences' },
+  8: { title: 'Studio Settings', subtitle: 'Configure metadata storage engine (MySQL / PostgreSQL), application timezone, and display preferences' },
 };
 
 export const TopHeader = ({ 

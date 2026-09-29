@@ -152,9 +152,23 @@ export const TransformationStudioView = ({
 }) => {
   const [activeDataset, setActiveDataset] = useState(() => {
     try {
-      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
-      if (savedId && Array.isArray(allDatasets) && allDatasets.length > 0) {
-        return allDatasets.find((d) => d.id === savedId) || null;
+      if (Array.isArray(allDatasets) && allDatasets.length > 0) {
+        if (initialDatasetId) {
+          const match = allDatasets.find((d) => d.id === initialDatasetId);
+          if (match) return match;
+        }
+        if (activeFlowId && activeFlowId !== 'all') {
+          const flowMatch = allDatasets.find((d) => d.flow_id === activeFlowId);
+          if (flowMatch) return flowMatch;
+        }
+        const savedId = localStorage.getItem('dataflow_transform_active_stage_id');
+        if (savedId) {
+          const savedMatch = allDatasets.find((d) => d.id === savedId);
+          if (savedMatch && (!activeFlowId || activeFlowId === 'all' || savedMatch.flow_id === activeFlowId)) {
+            return savedMatch;
+          }
+        }
+        return allDatasets[0] || null;
       }
       return null;
     } catch {
@@ -193,8 +207,10 @@ export const TransformationStudioView = ({
         }
       } else {
         // Active dataset is stale (e.g. backend restarted or stage deleted)
-        const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
-        const fallbackMatch = allDatasets.find((d) => d.id === savedId) || allDatasets[0];
+        const targetFlow = activeFlowId && activeFlowId !== 'all' ? activeFlowId : null;
+        const fallbackMatch = targetFlow 
+          ? allDatasets.find((d) => d.flow_id === targetFlow) || allDatasets[0]
+          : allDatasets[0];
         setActiveDataset(fallbackMatch || null);
         setPreviewResult(null);
         setErrorMsg(null);
@@ -207,17 +223,35 @@ export const TransformationStudioView = ({
       return;
     }
 
-    // If activeDataset is not set yet, pick from savedId or initialDatasetId or first available
+    // If activeDataset is not set yet, pick from initialDatasetId, activeFlowId, savedId or first available
     try {
-      const savedId = localStorage.getItem('dataflow_transform_active_stage_id') || initialDatasetId;
-      const match = allDatasets.find((d) => d.id === savedId) || (initialDatasetId ? allDatasets.find((d) => d.id === initialDatasetId) : null);
-      if (match) {
-        setActiveDataset(match);
-      } else if (allDatasets.length > 0) {
+      if (initialDatasetId) {
+        const initMatch = allDatasets.find((d) => d.id === initialDatasetId);
+        if (initMatch) {
+          setActiveDataset(initMatch);
+          return;
+        }
+      }
+      if (activeFlowId && activeFlowId !== 'all') {
+        const flowMatch = allDatasets.find((d) => d.flow_id === activeFlowId);
+        if (flowMatch) {
+          setActiveDataset(flowMatch);
+          return;
+        }
+      }
+      const savedId = localStorage.getItem('dataflow_transform_active_stage_id');
+      if (savedId) {
+        const savedMatch = allDatasets.find((d) => d.id === savedId);
+        if (savedMatch && (!activeFlowId || activeFlowId === 'all' || savedMatch.flow_id === activeFlowId)) {
+          setActiveDataset(savedMatch);
+          return;
+        }
+      }
+      if (allDatasets.length > 0) {
         setActiveDataset(allDatasets[0]);
       }
     } catch {}
-  }, [allDatasets, initialDatasetId, activeDataset]);
+  }, [allDatasets]);
 
   // Persist active dataset ID to localStorage
   useEffect(() => {
@@ -267,12 +301,16 @@ export const TransformationStudioView = ({
 
   // Helper to always resolve a valid target flow ID
   const resolveTargetFlowId = () => {
-    return activeDataset?.flow_id || (activeFlowId !== 'all' ? activeFlowId : null) || (flows && flows[0]?.id) || null;
+    if (activeDataset?.flow_id) return activeDataset.flow_id;
+    if (activeFlowId && activeFlowId !== 'all') return activeFlowId;
+    if (flows && flows.length > 0) return flows[0].id;
+    return null;
   };
 
-  // Determine current effective flow
+  // Determine current effective flow and datasets belonging to it
   const currentFlowId = resolveTargetFlowId();
   const currentFlow = flows.find((f) => f.id === currentFlowId) || { id: currentFlowId || '', name: currentFlowId ? `Flow ${currentFlowId}` : 'General Flow' };
+  const flowDatasets = allDatasets.filter((d) => currentFlowId ? d.flow_id === currentFlowId : true);
 
   // Sync flow filter with activeFlowId prop
   useEffect(() => {
@@ -282,20 +320,6 @@ export const TransformationStudioView = ({
       setSelectedFlowFilter('all');
     }
   }, [activeFlowId]);
-
-  // Load flow rules when dataset or flow changes
-  useEffect(() => {
-    const flowId = resolveTargetFlowId();
-    if (flowId) {
-      DataFlowAPI.getFlowRules(flowId)
-        .then((res) => {
-          if (res && Array.isArray(res.rules)) {
-            setRules(res.rules);
-          }
-        })
-        .catch((err) => console.error('Failed to load flow rules', err));
-    }
-  }, [activeDataset, activeFlowId, flows]);
 
   // Handle browser / mobile back button inside Transformation Studio
   useEffect(() => {
@@ -330,16 +354,114 @@ export const TransformationStudioView = ({
     setSelectedStatsCols([]);
 
     // If dataset belongs to a flow or active flow has rules, load them
-    const flowId = ds.flow_id || resolveTargetFlowId();
+    const flowId = ds.flow_id || (activeFlowId !== 'all' ? activeFlowId : null);
     if (flowId) {
       try {
         const res = await DataFlowAPI.getFlowRules(flowId);
-        if (res && Array.isArray(res.rules) && res.rules.length > 0) {
+        if (res && Array.isArray(res.rules)) {
           setRules(res.rules);
+        } else {
+          setRules([]);
         }
       } catch (err) {
         console.error('Failed to load rules for stage', err);
+        setRules([]);
       }
+    } else {
+      setRules([]);
+    }
+  };
+
+  // Watch for activeFlowId changes from outside (e.g. TopHeader) and switch dataset if necessary
+  const prevActiveFlowIdRef = useRef(activeFlowId);
+  useEffect(() => {
+    if (activeFlowId !== prevActiveFlowIdRef.current) {
+      prevActiveFlowIdRef.current = activeFlowId;
+      if (activeFlowId && activeFlowId !== 'all') {
+        setSelectedFlowFilter(activeFlowId);
+        if (activeDataset && activeDataset.flow_id !== activeFlowId) {
+          const flowStages = allDatasets.filter((d) => d.flow_id === activeFlowId);
+          if (flowStages.length > 0) {
+            handleSelectStage(flowStages[0]);
+          } else {
+            setActiveDataset(null);
+            setRules([]);
+            setPreviewResult(null);
+            try {
+              localStorage.removeItem('dataflow_transform_active_stage_id');
+            } catch {}
+          }
+        }
+      } else if (activeFlowId === 'all') {
+        setSelectedFlowFilter('all');
+      }
+    }
+  }, [activeFlowId, activeDataset, allDatasets]);
+
+  // Watch for initialDatasetId changes (e.g. from StagingAreaView "Transform" click)
+  const prevInitialDatasetIdRef = useRef(initialDatasetId);
+  useEffect(() => {
+    if (initialDatasetId && initialDatasetId !== prevInitialDatasetIdRef.current) {
+      prevInitialDatasetIdRef.current = initialDatasetId;
+      if (initialDatasetId !== activeDataset?.id) {
+        const target = allDatasets.find((d) => d.id === initialDatasetId);
+        if (target) {
+          handleSelectStage(target);
+        }
+      }
+    }
+  }, [initialDatasetId, allDatasets, activeDataset]);
+
+  // Load flow rules when dataset or flow changes
+  useEffect(() => {
+    const flowId = resolveTargetFlowId();
+    if (flowId) {
+      DataFlowAPI.getFlowRules(flowId)
+        .then((res) => {
+          if (res && Array.isArray(res.rules)) {
+            setRules(res.rules);
+          } else {
+            setRules([]);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load flow rules', err);
+          setRules([]);
+        });
+    }
+  }, [activeDataset?.id, activeDataset?.flow_id, activeFlowId, flows]);
+
+  const handleFlowSelectChange = async (newFlowId) => {
+    if (!newFlowId) return;
+    if (onSelectFlow) {
+      onSelectFlow(newFlowId);
+    }
+    setSelectedFlowFilter(newFlowId);
+
+    const matchingDatasets = allDatasets.filter((d) => d.flow_id === newFlowId);
+    if (matchingDatasets.length > 0) {
+      await handleSelectStage(matchingDatasets[0]);
+    } else {
+      setActiveDataset(null);
+      setPreviewResult(null);
+      setErrorMsg(null);
+      setEditingRuleId(null);
+      try {
+        localStorage.removeItem('dataflow_transform_active_stage_id');
+      } catch {}
+      try {
+        const res = await DataFlowAPI.getFlowRules(newFlowId);
+        setRules(res && Array.isArray(res.rules) ? res.rules : []);
+      } catch {
+        setRules([]);
+      }
+    }
+  };
+
+  const handleDatasetSelectChange = (newDatasetId) => {
+    const target = allDatasets.find((d) => d.id === newDatasetId);
+    if (target) {
+      handleSelectStage(target);
     }
   };
 
@@ -1107,44 +1229,81 @@ export const TransformationStudioView = ({
   return (
     <div className="space-y-5 animate-fadeIn pb-20 sm:pb-8">
       {/* Top Header Card */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs transition-colors">
-        <div className="flex items-start sm:items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 shadow-xs transition-colors">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={handleBackToStagesList}
-            className="p-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors flex items-center space-x-1 text-xs font-medium shrink-0 mt-0.5 sm:mt-0"
-            title="Back to stages list"
+            className="p-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors flex items-center space-x-1 text-xs font-medium shrink-0"
+            title="Browse all staged datasets"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Stages</span>
+            <span className="hidden sm:inline">All Stages</span>
           </button>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center space-x-2 mb-0.5">
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 uppercase shrink-0">
-                ACTIVE STAGE
-              </span>
-              {currentFlow && (
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 truncate max-w-[150px] sm:max-w-none shrink-0">
-                  FLOW: {currentFlow.name}
-                </span>
-              )}
+          {/* Flow Selector Dropdown */}
+          {flows.length > 0 && (
+            <div className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5 rounded-md text-xs shrink-0">
+              <GitBranch className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+              <span className="text-zinc-500 dark:text-zinc-400 font-medium">Flow:</span>
+              <select
+                value={currentFlowId || ''}
+                onChange={(e) => handleFlowSelectChange(e.target.value)}
+                className="bg-transparent font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer max-w-[140px] sm:max-w-[200px] truncate"
+              >
+                {flows.map((f) => (
+                  <option key={f.id} value={f.id} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+                    {f.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate block">
-              {activeDataset.name}
-            </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 truncate">
-              ID: {activeDataset.id} • {activeDataset.row_count.toLocaleString()} rows • {activeDataset.column_count} cols
-            </p>
+          )}
+
+          {/* Dataset / Table Selector Dropdown */}
+          <div className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5 rounded-md text-xs shrink-0">
+            <TableIcon className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+            <span className="text-zinc-500 dark:text-zinc-400 font-medium">Stage:</span>
+            <select
+              value={activeDataset?.id || ''}
+              onChange={(e) => handleDatasetSelectChange(e.target.value)}
+              className="bg-transparent font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer max-w-[160px] sm:max-w-[220px] truncate"
+            >
+              {flowDatasets.length === 0 ? (
+                <option value={activeDataset?.id || ''}>
+                  {activeDataset?.name || 'Selected Table'}
+                </option>
+              ) : (
+                flowDatasets.map((d) => (
+                  <option key={d.id} value={d.id} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+                    {d.name} ({d.row_count?.toLocaleString()} rows)
+                  </option>
+                ))
+              )}
+            </select>
           </div>
+
+          {/* Dataset Metric Stats Badge */}
+          {activeDataset && (
+            <div className="hidden xl:flex items-center space-x-2 text-xs font-mono text-zinc-500 dark:text-zinc-400">
+              <span className="text-zinc-300 dark:text-zinc-700">•</span>
+              <span><strong>{activeDataset.row_count?.toLocaleString()}</strong> rows</span>
+              <span className="text-zinc-300 dark:text-zinc-700">•</span>
+              <span><strong>{activeDataset.column_count}</strong> cols</span>
+              <span className="text-zinc-300 dark:text-zinc-700">•</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 uppercase">
+                {activeDataset.source_type}
+              </span>
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+        <div className="flex items-center gap-2 w-full lg:w-auto mt-1 lg:mt-0 justify-end shrink-0">
           <button
             type="button"
             onClick={handlePreview}
             disabled={previewLoading || rules.length === 0}
-            className="flex-1 sm:flex-initial justify-center px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+            className="flex-1 lg:flex-initial justify-center px-3.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1.5 transition-colors disabled:opacity-50"
           >
             <Play className={`w-3.5 h-3.5 ${previewLoading ? 'animate-spin' : ''}`} />
             <span>{previewLoading ? 'Executing...' : 'Live Preview'}</span>
@@ -1183,7 +1342,7 @@ export const TransformationStudioView = ({
             type="button"
             onClick={handleProceed}
             disabled={rules.length === 0}
-            className="flex-1 sm:flex-initial justify-center px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+            className="flex-1 lg:flex-initial justify-center px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
           >
             <span>Run Pipeline</span>
             <ArrowRight className="w-3.5 h-3.5" />

@@ -27,19 +27,16 @@ def load_env_file(env_path: Path):
 # Load backend .env file
 load_env_file(BASE_DIR / ".env")
 
-# Optional fallback paths (stored in system temp if needed)
-import tempfile
-TMP_DIR = Path(tempfile.gettempdir()) / "dataflow_studio"
-CATALOG_DB_PATH = TMP_DIR / "catalog_fallback.db"
-
 class Settings(BaseModel):
     APP_NAME: str = "DataFlow SparkLake Studio"
     APP_VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
-    CATALOG_DB_PATH: Path = CATALOG_DB_PATH
     SPARK_APP_NAME: str = "DataFlowStudioEngine"
     SPARK_MASTER: str = "local[*]"
     DEFAULT_PAGE_SIZE: int = 50
+
+    # Active Metadata Storage Engine: 'mysql' or 'postgres'
+    METADATA_ENGINE: str = os.getenv("METADATA_ENGINE", "mysql").lower()
 
     # MySQL Metadata Storage Config
     MYSQL_HOST: str = os.getenv("MYSQL_HOST", "localhost")
@@ -47,11 +44,28 @@ class Settings(BaseModel):
     MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
     MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "3435")
     MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "dataflow_metadata")
-    USE_MYSQL_METADATA: bool = os.getenv("USE_MYSQL_METADATA", "true").lower() in ("true", "1", "yes")
+
+    # PostgreSQL Metadata Storage Config
+    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
+    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
+    POSTGRES_DATABASE: str = os.getenv("POSTGRES_DATABASE", "dataflow_metadata")
+    POSTGRES_SCHEMA: str = os.getenv("POSTGRES_SCHEMA", "public")
 
     def get_mysql_metadata_url(self) -> str:
         user = urllib.parse.quote_plus(self.MYSQL_USER)
         pwd = f":{urllib.parse.quote_plus(self.MYSQL_PASSWORD)}" if self.MYSQL_PASSWORD else ""
         return f"mysql+pymysql://{user}{pwd}@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
+
+    def get_postgres_metadata_url(self) -> str:
+        user = urllib.parse.quote_plus(self.POSTGRES_USER)
+        pwd = f":{urllib.parse.quote_plus(self.POSTGRES_PASSWORD)}" if self.POSTGRES_PASSWORD else ""
+        return f"postgresql+psycopg2://{user}{pwd}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DATABASE}"
+
+    def get_active_metadata_url(self) -> str:
+        if self.METADATA_ENGINE == "postgres":
+            return self.get_postgres_metadata_url()
+        return self.get_mysql_metadata_url()
 
 settings = Settings()

@@ -34,14 +34,23 @@ export const HistoryAuditView = () => {
   const [selectedLog, setSelectedLog] = useState(null);
 
   // Storage Engine State
-  const [selectedEngine, setSelectedEngine] = useState('mysql'); // 'mysql' | 'sqlite'
-  const [activeServerEngine, setActiveServerEngine] = useState(null);
-  const [dbHost, setDbHost] = useState('localhost');
-  const [dbPort, setDbPort] = useState(3306);
-  const [dbUser, setDbUser] = useState('root');
-  const [dbPassword, setDbPassword] = useState('');
-  const [dbDatabase, setDbDatabase] = useState('dataflow_metadata');
-  const [sqlitePath, setSqlitePath] = useState('');
+  const [selectedEngine, setSelectedEngine] = useState('mysql'); // 'mysql' | 'postgres'
+  const [activeServerEngine, setActiveServerEngine] = useState('mysql');
+  
+  // MySQL Settings State
+  const [mysqlHost, setMysqlHost] = useState('localhost');
+  const [mysqlPort, setMysqlPort] = useState(3306);
+  const [mysqlUser, setMysqlUser] = useState('root');
+  const [mysqlPassword, setMysqlPassword] = useState('');
+  const [mysqlDatabase, setMysqlDatabase] = useState('dataflow_metadata');
+
+  // PostgreSQL Settings State
+  const [pgHost, setPgHost] = useState('localhost');
+  const [pgPort, setPgPort] = useState(5432);
+  const [pgUser, setPgUser] = useState('postgres');
+  const [pgPassword, setPgPassword] = useState('');
+  const [pgDatabase, setPgDatabase] = useState('dataflow_metadata');
+  const [pgSchema, setPgSchema] = useState('public');
   
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -63,13 +72,22 @@ export const HistoryAuditView = () => {
       setIngestionLogs(ingRes);
       setTransformLogs(txRes);
       if (credRes) {
-        setSelectedEngine(credRes.active_engine || (credRes.use_mysql ? 'mysql' : 'sqlite'));
-        setActiveServerEngine(credRes.active_engine || 'sqlite');
-        setDbHost(credRes.host || 'localhost');
-        setDbPort(credRes.port || 3306);
-        setDbUser(credRes.user || 'root');
-        setDbDatabase(credRes.database || 'dataflow_metadata');
-        setSqlitePath(credRes.sqlite_path || 'catalog_fallback.db');
+        const engine = credRes.active_engine === 'postgres' ? 'postgres' : 'mysql';
+        setSelectedEngine(engine);
+        setActiveServerEngine(engine);
+        if (credRes.mysql) {
+          setMysqlHost(credRes.mysql.host || 'localhost');
+          setMysqlPort(credRes.mysql.port || 3306);
+          setMysqlUser(credRes.mysql.user || 'root');
+          setMysqlDatabase(credRes.mysql.database || 'dataflow_metadata');
+        }
+        if (credRes.postgres) {
+          setPgHost(credRes.postgres.host || 'localhost');
+          setPgPort(credRes.postgres.port || 5432);
+          setPgUser(credRes.postgres.user || 'postgres');
+          setPgDatabase(credRes.postgres.database || 'dataflow_metadata');
+          setPgSchema(credRes.postgres.schema || 'public');
+        }
       }
     } catch (err) {
       console.error('Failed to load history data', err);
@@ -82,22 +100,32 @@ export const HistoryAuditView = () => {
     fetchAllData();
   }, []);
 
-  const handleTestMySQL = async () => {
+  const handleTestConnection = async () => {
     setTestingConnection(true);
     setTestResult(null);
     try {
-      const res = await DataFlowAPI.testMySQLCredentials({
-        host: dbHost.trim(),
-        port: Number(dbPort),
-        user: dbUser.trim(),
-        password: dbPassword,
-        database: dbDatabase.trim(),
-      });
+      const payload = selectedEngine === 'mysql' ? {
+        engine: 'mysql',
+        host: mysqlHost.trim(),
+        port: Number(mysqlPort),
+        user: mysqlUser.trim(),
+        password: mysqlPassword,
+        database: mysqlDatabase.trim(),
+      } : {
+        engine: 'postgres',
+        host: pgHost.trim(),
+        port: Number(pgPort),
+        user: pgUser.trim(),
+        password: pgPassword,
+        database: pgDatabase.trim(),
+        schema_name: pgSchema.trim(),
+      };
+      const res = await DataFlowAPI.testDatabaseConnection(payload);
       setTestResult(res);
     } catch (err) {
       setTestResult({
         success: false,
-        message: err?.response?.data?.detail || err.message || 'MySQL test connection failed',
+        message: err?.response?.data?.detail || err.message || `${selectedEngine === 'mysql' ? 'MySQL' : 'PostgreSQL'} test connection failed`,
       });
     } finally {
       setTestingConnection(false);
@@ -111,11 +139,31 @@ export const HistoryAuditView = () => {
     try {
       const payload = {
         active_engine: selectedEngine,
-        host: dbHost.trim(),
-        port: Number(dbPort),
-        user: dbUser.trim(),
-        password: dbPassword,
-        database: dbDatabase.trim(),
+        ...(selectedEngine === 'mysql' ? {
+          host: mysqlHost.trim(),
+          port: Number(mysqlPort),
+          user: mysqlUser.trim(),
+          password: mysqlPassword,
+          database: mysqlDatabase.trim(),
+          mysql_host: mysqlHost.trim(),
+          mysql_port: Number(mysqlPort),
+          mysql_user: mysqlUser.trim(),
+          mysql_password: mysqlPassword,
+          mysql_database: mysqlDatabase.trim(),
+        } : {
+          host: pgHost.trim(),
+          port: Number(pgPort),
+          user: pgUser.trim(),
+          password: pgPassword,
+          database: pgDatabase.trim(),
+          schema_name: pgSchema.trim(),
+          postgres_host: pgHost.trim(),
+          postgres_port: Number(pgPort),
+          postgres_user: pgUser.trim(),
+          postgres_password: pgPassword,
+          postgres_database: pgDatabase.trim(),
+          postgres_schema: pgSchema.trim(),
+        })
       };
       const res = await DataFlowAPI.updateMetadataCredentials(payload);
       setCredsStatus(res);
@@ -178,7 +226,7 @@ export const HistoryAuditView = () => {
                 Application History & Metadata Catalog
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
-                Database: <span className="text-zinc-800 dark:text-zinc-200 font-medium">{summary?.mysql_database || dbDatabase}</span> • Engine: <span className="text-zinc-800 dark:text-zinc-200 font-medium">{summary?.metadata_storage_engine || 'MySQL & SQLite'}</span>
+                Database: <span className="text-zinc-800 dark:text-zinc-200 font-medium">{summary?.active_database || (activeServerEngine === 'mysql' ? mysqlDatabase : pgDatabase)}</span> • Engine: <span className="text-zinc-800 dark:text-zinc-200 font-medium">{summary?.metadata_storage_engine || (activeServerEngine === 'mysql' ? 'MySQL Database' : 'PostgreSQL Database')}</span>
               </p>
             </div>
           </div>
@@ -424,14 +472,14 @@ export const HistoryAuditView = () => {
           {/* Active Engine Status Banner */}
           <div className="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center space-x-2.5">
-              <div className={`w-3 h-3 rounded-full ${activeServerEngine === 'mysql' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`} />
+              <div className={`w-3 h-3 rounded-full ${activeServerEngine === 'mysql' ? 'bg-emerald-500 animate-pulse' : 'bg-indigo-500 animate-pulse'}`} />
               <div>
                 <span className="text-[10px] font-mono uppercase text-zinc-400 block">Active Storage Engine</span>
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                   {activeServerEngine === 'mysql' ? (
-                    <>MySQL Database Engine (<span className="font-mono text-emerald-600 dark:text-emerald-400">{dbHost}:{dbPort}/{dbDatabase}</span>)</>
+                    <>MySQL Database Engine (<span className="font-mono text-emerald-600 dark:text-emerald-400">{mysqlHost}:{mysqlPort}/{mysqlDatabase}</span>)</>
                   ) : (
-                    <>SQLite Embedded Engine (<span className="font-mono text-blue-600 dark:text-blue-400">Local Catalog DB</span>)</>
+                    <>PostgreSQL Database Engine (<span className="font-mono text-indigo-600 dark:text-indigo-400">{pgHost}:{pgPort}/{pgDatabase}</span>)</>
                   )}
                 </span>
               </div>
@@ -440,9 +488,9 @@ export const HistoryAuditView = () => {
             <span className={`self-start sm:self-auto px-2.5 py-1 rounded text-[10px] font-mono font-semibold uppercase border ${
               activeServerEngine === 'mysql'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40'
-                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/40'
+                : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-400 dark:border-indigo-900/40'
             }`}>
-              {activeServerEngine === 'mysql' ? 'MySQL Active' : 'SQLite Active'}
+              {activeServerEngine === 'mysql' ? 'MySQL Active' : 'PostgreSQL Active'}
             </span>
           </div>
 
@@ -460,7 +508,7 @@ export const HistoryAuditView = () => {
             {/* MySQL Card */}
             <button
               type="button"
-              onClick={() => setSelectedEngine('mysql')}
+              onClick={() => { setSelectedEngine('mysql'); setTestResult(null); }}
               className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
                 selectedEngine === 'mysql'
                   ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-50/80 dark:bg-zinc-950/80 shadow-xs ring-1 ring-zinc-900 dark:ring-zinc-100'
@@ -476,21 +524,21 @@ export const HistoryAuditView = () => {
                   {selectedEngine === 'mysql' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                  Networked MySQL database server. Persists catalog tables, multi-tenant workflows, and audit histories.
+                  Enterprise SQL database server. Persists catalog tables, multi-tenant workflows, and audit histories.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-[10px] font-mono text-zinc-400">
                 <span>Default: localhost:3306</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">Full ACID</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">PyMySQL</span>
               </div>
             </button>
 
-            {/* SQLite Card */}
+            {/* PostgreSQL Card */}
             <button
               type="button"
-              onClick={() => setSelectedEngine('sqlite')}
+              onClick={() => { setSelectedEngine('postgres'); setTestResult(null); }}
               className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
-                selectedEngine === 'sqlite'
+                selectedEngine === 'postgres'
                   ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-50/80 dark:bg-zinc-950/80 shadow-xs ring-1 ring-zinc-900 dark:ring-zinc-100'
                   : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400'
               }`}
@@ -498,18 +546,18 @@ export const HistoryAuditView = () => {
               <div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">SQLite Embedded</span>
+                    <Database className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">PostgreSQL Database</span>
                   </div>
-                  {selectedEngine === 'sqlite' && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                  {selectedEngine === 'postgres' && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                  Embedded single-file database. Zero setup required; stores tables locally in a disk file.
+                  Robust object-relational database with ACID transactions, schema isolation, and high performance.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                <span>File: catalog_fallback.db</span>
-                <span className="font-semibold text-blue-600 dark:text-blue-400">Zero Setup</span>
+                <span>Default: localhost:5432</span>
+                <span className="font-semibold text-indigo-600 dark:text-indigo-400">Psycopg2</span>
               </div>
             </button>
           </div>
@@ -649,45 +697,152 @@ export const HistoryAuditView = () => {
             </form>
           )}
 
-          {/* SQLite Form & Activation */}
-          {selectedEngine === 'sqlite' && (
-            <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 space-y-3 animate-fadeIn">
-              <div className="flex items-center space-x-2 text-zinc-900 dark:text-zinc-100 font-semibold text-xs">
-                <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span>Embedded SQLite Catalog Configuration</span>
+          {/* PostgreSQL Configuration Form */}
+          {selectedEngine === 'postgres' && (
+            <form onSubmit={handleSaveCredentials} className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between pb-1 border-b border-zinc-200 dark:border-zinc-800">
+                <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 flex items-center space-x-1.5">
+                  <Key className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>PostgreSQL Connection Credentials</span>
+                </span>
+                <span className="text-[10px] font-mono text-zinc-400">Auto-creates schema & tables upon save</span>
               </div>
 
-              <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                DataFlow Studio will maintain all staged tables, schema metadata, and audit events in a local SQLite file. No external database server is required.
-              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">PostgreSQL Host *</label>
+                  <input
+                    type="text"
+                    required
+                    value={pgHost}
+                    onChange={(e) => setPgHost(e.target.value)}
+                    placeholder="localhost"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
 
-              <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 truncate">
-                <span className="text-zinc-400 block text-[10px] uppercase">Database File Path:</span>
-                <span className="text-blue-600 dark:text-blue-400">{sqlitePath || 'Local catalog fallback DB'}</span>
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Port *</label>
+                  <input
+                    type="number"
+                    required
+                    value={pgPort}
+                    onChange={(e) => setPgPort(e.target.value)}
+                    placeholder="5432"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
               </div>
 
-              {credsStatus && (
-                <div className="p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/40">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Database Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={pgDatabase}
+                    onChange={(e) => setPgDatabase(e.target.value)}
+                    placeholder="dataflow_metadata"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Schema</label>
+                  <input
+                    type="text"
+                    value={pgSchema}
+                    onChange={(e) => setPgSchema(e.target.value)}
+                    placeholder="public"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username *</label>
+                  <input
+                    type="text"
+                    required
+                    value={pgUser}
+                    onChange={(e) => setPgUser(e.target.value)}
+                    placeholder="postgres"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={pgPassword}
+                    onChange={(e) => setPgPassword(e.target.value)}
+                    placeholder="Enter PostgreSQL password"
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+              </div>
+
+              {/* Real-time Test Feedback */}
+              {testResult && (
+                <div className={`p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 ${
+                  testResult.success
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                    : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/40'
+                }`}>
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                  )}
                   <div>
-                    <p className="font-semibold">SQLite Active</p>
+                    <p className="font-semibold">{testResult.success ? 'PostgreSQL Connected' : 'PostgreSQL Connection Failed'}</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">{testResult.message}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Save Status Feedback */}
+              {credsStatus && (
+                <div className={`p-2.5 rounded-lg border text-xs font-mono flex items-start space-x-2 ${
+                  credsStatus.success
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/40'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900/40'
+                }`}>
+                  {credsStatus.success ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className="font-semibold">{credsStatus.success ? 'PostgreSQL Active' : 'Notice'}</p>
                     <p className="text-[11px] opacity-90 mt-0.5">{credsStatus.message}</p>
                   </div>
                 </div>
               )}
 
-              <div className="pt-2 flex justify-end">
+              <div className="pt-2 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={handleSaveCredentials}
+                  onClick={handleTestConnection}
+                  disabled={testingConnection}
+                  className="px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium flex items-center space-x-1.5 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+                  <span>{testingConnection ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+
+                <button
+                  type="submit"
                   disabled={savingCreds}
                   className="px-4 py-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1.5 shadow-xs transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{savingCreds ? 'Activating...' : 'Activate SQLite Storage'}</span>
+                  <span>{savingCreds ? 'Saving & Connecting...' : 'Save & Connect PostgreSQL'}</span>
                 </button>
               </div>
-            </div>
+            </form>
           )}
 
         </div>

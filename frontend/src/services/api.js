@@ -350,6 +350,16 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  testPostgresCredentials: async (creds) => {
+    const res = await api.post('/history/test-postgres', creds);
+    return res.data;
+  },
+
+  testDatabaseConnection: async (payload) => {
+    const res = await api.post('/history/test-connection', payload);
+    return res.data;
+  },
+
   updateMetadataCredentials: async (creds) => {
     const res = await api.post('/history/credentials', creds);
     invalidateDataFlowCache();
