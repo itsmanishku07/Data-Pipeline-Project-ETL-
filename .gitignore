@@ -47,7 +47,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 frontend/dist/
-dist/
+# Note: backend/dist/ is NOT ignored — it contains the pre-built frontend
+# served by FastAPI in Databricks App deployments
+!backend/dist/
+!backend/dist/**
 
 # Environment Variables & Secrets
 .env

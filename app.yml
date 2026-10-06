@@ -1,0 +1,17 @@
+command: ["python", "app.py"]
+
+env:
+  - name: METADATA_ENGINE
+    value: "postgres"
+  - name: POSTGRES_HOST
+    value: "ep-soft-sound-d8s8j5tw.database.us-east-2.cloud.databricks.com"
+  - name: POSTGRES_PORT
+    value: "5432"
+  - name: POSTGRES_USER
+    value: "manish0704ku@gmail.com"
+  - name: POSTGRES_PASSWORD
+    value: "YOUR_POSTGRES_PASSWORD_HERE"
+  - name: POSTGRES_DATABASE
+    value: "databricks_postgres"
+  - name: POSTGRES_SCHEMA
+    value: "public"
