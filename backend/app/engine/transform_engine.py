@@ -162,7 +162,8 @@ class TransformationEngine:
                     else:
                         select_parts.append(f"{op}(\"{col}\") AS \"{alias}\"")
                 
-                group_clause = f"GROUP BY {', '.join([f'\"{c}\"' for c in group_by_cols])}" if group_by_cols else ""
+                group_cols_str = ", ".join([f'"{c}"' for c in group_by_cols])
+                group_clause = f"GROUP BY {group_cols_str}" if group_by_cols else ""
                 query = f"SELECT {', '.join(select_parts)} FROM current_df {group_clause}"
                 
                 con = duckdb.connect(":memory:")
@@ -190,7 +191,8 @@ class TransformationEngine:
 
             over_parts = []
             if partition_by:
-                over_parts.append(f"PARTITION BY {', '.join([f'\"{c}\"' for c in partition_by])}")
+                part_cols_str = ", ".join([f'"{c}"' for c in partition_by])
+                over_parts.append(f"PARTITION BY {part_cols_str}")
             if order_by:
                 over_parts.append(f"ORDER BY \"{order_by}\" {order_dir}")
 
@@ -453,7 +455,8 @@ class TransformationEngine:
                 ctes.append(f"{cte_name} AS (\n    SELECT {cols_str}\n    FROM {prev_table}\n)")
             elif rtype == RuleType.DROP_COLUMNS:
                 cols = p.get("columns", [])
-                exclude_str = f" EXCLUDE ({', '.join([f'\"{c}\"' for c in cols])})" if cols else ""
+                cols_str = ", ".join([f'"{c}"' for c in cols])
+                exclude_str = f" EXCLUDE ({cols_str})" if cols else ""
                 ctes.append(f"{cte_name} AS (\n    SELECT *{exclude_str}\n    FROM {prev_table}\n)")
             elif rtype == RuleType.AGGREGATE:
                 group_by = p.get("group_by", [])
@@ -467,7 +470,8 @@ class TransformationEngine:
                         select_parts.append(f'COUNT(DISTINCT "{col}") AS "{alias}"')
                     else:
                         select_parts.append(f'{op}("{col}") AS "{alias}"')
-                grp_clause = f" GROUP BY {', '.join([f'\"{c}\"' for c in group_by])}" if group_by else ""
+                grp_cols_str = ", ".join([f'"{c}"' for c in group_by])
+                grp_clause = f" GROUP BY {grp_cols_str}" if group_by else ""
                 ctes.append(f"{cte_name} AS (\n    SELECT {', '.join(select_parts)} FROM {prev_table}{grp_clause}\n)")
             elif rtype == RuleType.WINDOW_FUNCTION:
                 func_type = (p.get("function_type") or "ROW_NUMBER").upper()
@@ -487,7 +491,8 @@ class TransformationEngine:
 
                 over_parts = []
                 if partition_by:
-                    over_parts.append(f"PARTITION BY {', '.join([f'\"{c}\"' for c in partition_by])}")
+                    part_cols_str = ", ".join([f'"{c}"' for c in partition_by])
+                    over_parts.append(f"PARTITION BY {part_cols_str}")
                 if order_by:
                     over_parts.append(f"ORDER BY \"{order_by}\" {order_dir}")
 
