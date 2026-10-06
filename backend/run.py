@@ -1,15 +1,38 @@
-import uvicorn
-import sys
-import os
+# import uvicorn
+# import sys
+# import os
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+# if sys.platform == "win32":
+#     try:
+#         sys.stdout.reconfigure(encoding="utf-8")
+#         sys.stderr.reconfigure(encoding="utf-8")
+#     except Exception:
+#         pass
+
+# if __name__ == "__main__":
+#     sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+#     print("[INFO] Starting DataFlow Studio FastAPI backend server on http://localhost:8000 ...")
+#     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+
+
+import os
+import sys
+import uvicorn
+
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-    print("[INFO] Starting DataFlow Studio FastAPI backend server on http://localhost:8000 ...")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+
+    port = int(os.environ.get("DATABRICKS_APP_PORT", "8000"))
+
+    print(f"Starting FastAPI backend on port {port}...")
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False
+    )
