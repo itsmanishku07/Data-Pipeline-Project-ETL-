@@ -54,7 +54,7 @@ def get_db_connection():
                 "options": f"-csearch_path={settings.POSTGRES_SCHEMA},public"
             }
             host = (settings.POSTGRES_HOST or "").lower()
-            if any(cloud in host for cloud in [".azure.com", ".amazonaws.com", ".supabase.co", ".neon.tech", ".aivencloud.com"]):
+            if any(cloud in host for cloud in [".azure.com", ".amazonaws.com", ".supabase.co", ".neon.tech", ".aivencloud.com", ".databricks.com"]):
                 connect_args["sslmode"] = "require"
 
             engine = create_engine(
