@@ -8,9 +8,9 @@ env:
   - name: POSTGRES_PORT
     value: "5432"
   - name: POSTGRES_USER
-    value: "manish0704ku@gmail.com"
+    value: "manishku07"
   - name: POSTGRES_PASSWORD
-    value: "YOUR_POSTGRES_PASSWORD_HERE"
+    value: "npg_pDYRIg3r9Gwq"
   - name: POSTGRES_DATABASE
     value: "databricks_postgres"
   - name: POSTGRES_SCHEMA
