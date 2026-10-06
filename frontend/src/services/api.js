@@ -3,7 +3,9 @@ import axios from 'axios';
 // Dynamically resolve Backend API Base URL from VITE_API_BASE_URL env variable
 const resolveApiBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
-  if (!envUrl) {
+  // If not specified or pointing to localhost, use relative '/api'
+  // so requests go directly to the same host serving the frontend (e.g. Databricks App)
+  if (!envUrl || envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) {
     return '/api';
   }
   const clean = envUrl.trim().replace(/\/+$/, '');

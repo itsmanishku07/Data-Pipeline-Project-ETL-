@@ -21,6 +21,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: '../backend/dist',
+    emptyOutDir: true,
+  },
   preview: {
     host: '0.0.0.0',
     allowedHosts: true,
@@ -31,7 +35,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://20.219.71.141:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       }
     }
