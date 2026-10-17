@@ -1,6 +1,7 @@
 import json
 import uuid
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, text
@@ -30,35 +31,69 @@ def get_db_connection():
     """
     global _GLOBAL_ENGINE, _GLOBAL_ENGINE_TYPE
     target_engine = (settings.METADATA_ENGINE or "mysql").lower()
+    # The Databricks app resource injects PG* connection variables. Select Lakebase
+    # automatically in that environment unless an explicit PostgreSQL engine is set.
+    if target_engine == "mysql" and settings.LAKEBASE_MODE and all(os.getenv(name) for name in ("PGHOST", "PGDATABASE", "PGUSER")):
+        target_engine = "postgres"
 
     if _GLOBAL_ENGINE is not None and _GLOBAL_ENGINE_TYPE == target_engine:
         return _GLOBAL_ENGINE_TYPE, _GLOBAL_ENGINE
 
     if target_engine == "postgres":
         try:
-            # 1. Ensure target postgres database exists (attempt creation via default postgres database)
-            try:
-                import urllib.parse
-                user = urllib.parse.quote_plus(settings.POSTGRES_USER)
-                pwd = f":{urllib.parse.quote_plus(settings.POSTGRES_PASSWORD)}" if settings.POSTGRES_PASSWORD else ""
-                admin_url = f"postgresql+psycopg2://{user}{pwd}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/postgres"
-                admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 4})
-                with admin_engine.connect() as aconn:
-                    check_db = aconn.execute(text("SELECT 1 FROM pg_database WHERE datname = :db"), {"db": settings.POSTGRES_DATABASE})
-                    if not check_db.fetchone():
-                        safe_db = settings.POSTGRES_DATABASE.replace('"', '').replace("'", "")
-                        aconn.execute(text(f'CREATE DATABASE "{safe_db}";'))
-                admin_engine.dispose()
-            except Exception:
-                pass
+            # Lakebase App resources provide PG* variables and an app service identity.
+            # Exchange that identity for a short-lived database credential per new connection.
+            if settings.LAKEBASE_MODE:
+                if not settings.LAKEBASE_ENDPOINT.startswith("projects/") or "/branches/" not in settings.LAKEBASE_ENDPOINT or "/endpoints/" not in settings.LAKEBASE_ENDPOINT:
+                    raise RuntimeError("LAKEBASE_ENDPOINT must be a Lakebase endpoint path: projects/<id>/branches/<id>/endpoints/<id>.")
+                required = [settings.POSTGRES_HOST, settings.POSTGRES_DATABASE, settings.POSTGRES_USER]
+                if not all(required):
+                    raise RuntimeError("Lakebase requires PGHOST, PGDATABASE, PGUSER, and LAKEBASE_ENDPOINT app resource configuration.")
+                from databricks.sdk import WorkspaceClient
+                workspace_client = WorkspaceClient()
 
-            # 2. Connect to the specific target database
-            connect_args = {
-                "connect_timeout": 5,
-                "options": f"-csearch_path={settings.POSTGRES_SCHEMA},public"
-            }
+                def provide_lakebase_token(dialect, conn_rec, cargs, cparams):
+                    credential = workspace_client.postgres.generate_database_credential(endpoint=settings.LAKEBASE_ENDPOINT)
+                    cparams["password"] = credential.token
+
+                connect_args = {"connect_timeout": settings.DB_CONNECTION_TIMEOUT, "sslmode": "require"}
+                if settings.POSTGRES_SEARCH_PATH:
+                    safe_path = settings.POSTGRES_SEARCH_PATH
+                    if not all(part.replace("_", "").isalnum() for part in safe_path.split(",")):
+                        raise ValueError("POSTGRES_SEARCH_PATH must be a comma-separated list of valid schema identifiers.")
+                    connect_args["options"] = f"-csearch_path={safe_path}"
+                engine = create_engine(
+                    settings.get_lakebase_metadata_url(),
+                    connect_args=connect_args,
+                    pool_size=settings.DB_POOL_SIZE,
+                    max_overflow=settings.DB_MAX_OVERFLOW,
+                    pool_recycle=min(settings.DB_POOL_RECYCLE, 1800),
+                    pool_pre_ping=True,
+                )
+                from sqlalchemy import event
+                event.listen(engine, "do_connect", provide_lakebase_token)
+                _GLOBAL_ENGINE = engine
+                _GLOBAL_ENGINE_TYPE = "postgres"
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                    logger.info("Connected to Lakebase PostgreSQL using Databricks app identity.")
+                except Exception:
+                    engine.dispose()
+                    _GLOBAL_ENGINE = None
+                    _GLOBAL_ENGINE_TYPE = None
+                    raise
+                return "postgres", _GLOBAL_ENGINE
+
+            # Standalone PostgreSQL: connect only to the explicitly configured database.
+            connect_args = {"connect_timeout": settings.DB_CONNECTION_TIMEOUT}
+            if settings.POSTGRES_SEARCH_PATH:
+                safe_path = settings.POSTGRES_SEARCH_PATH
+                if not all(part.replace("_", "").isalnum() for part in safe_path.split(",")):
+                    raise ValueError("POSTGRES_SEARCH_PATH must be a comma-separated list of valid schema identifiers.")
+                connect_args["options"] = f"-csearch_path={safe_path}"
             host = (settings.POSTGRES_HOST or "").lower()
-            if any(cloud in host for cloud in [".azure.com", ".amazonaws.com", ".supabase.co", ".neon.tech", ".aivencloud.com"]):
+            if any(cloud in host for cloud in [".azure.com", ".amazonaws.com", ".supabase.co", ".neon.tech", ".aivencloud.com", ".databricks.com"]):
                 connect_args["sslmode"] = "require"
 
             engine = create_engine(
@@ -77,6 +112,13 @@ def get_db_connection():
             logger.info("Connected to PostgreSQL metadata database successfully.")
             return "postgres", _GLOBAL_ENGINE
         except Exception as e:
+            if _GLOBAL_ENGINE is not None:
+                try:
+                    _GLOBAL_ENGINE.dispose()
+                except Exception:
+                    pass
+            _GLOBAL_ENGINE = None
+            _GLOBAL_ENGINE_TYPE = None
             logger.error(f"Failed to connect to PostgreSQL metadata database: {e}", exc_info=True)
             return "postgres", None
 
@@ -130,18 +172,16 @@ def init_db():
     """Initializes metadata tables in the active metadata database (MySQL or PostgreSQL)."""
     db_type, engine = get_db_connection()
     if engine is None:
-        logger.warning(f"Cannot initialize tables: {db_type} database is offline or unreachable.")
-        return
+        raise RuntimeError(f"Cannot initialize metadata tables: {db_type} database is offline or unreachable.")
 
     try:
         with engine.connect() as conn:
             if db_type == "postgres":
                 # Ensure PostgreSQL schema exists
-                try:
-                    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{settings.POSTGRES_SCHEMA}";'))
-                    conn.commit()
-                except Exception:
-                    pass
+                if not settings.POSTGRES_SCHEMA.replace("_", "").isalnum():
+                    raise ValueError("POSTGRES_SCHEMA must contain only letters, digits, and underscores.")
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{settings.POSTGRES_SCHEMA}";'))
+                conn.commit()
 
                 conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS dataflow_flows (
@@ -207,8 +247,6 @@ def init_db():
                     pending_rows_json TEXT NULL,
                     updated_at TIMESTAMP NOT NULL
                 );
-                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_columns_json TEXT NULL;
-                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_rows_json TEXT NULL;
                 ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_columns_json TEXT NULL;
                 ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_rows_json TEXT NULL;
 
@@ -525,10 +563,8 @@ def init_db():
             except Exception:
                 pass
     except Exception as e:
-        print(f"[WARN] Table initialization warning on {db_type}: {e}")
-
-# Run initialization at module load
-init_db()
+        logger.exception("Metadata table initialization failed for %s", db_type)
+        raise RuntimeError(f"Metadata table initialization failed for {db_type}: {e}") from e
 
 def _format_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Helper to ensure all datetime values in a record are ISO 8601 formatted strings."""

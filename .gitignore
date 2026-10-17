@@ -47,6 +47,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 frontend/dist/
+backend/frontend_dist/
 dist/
 
 # Environment Variables & Secrets

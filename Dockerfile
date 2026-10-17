@@ -1,22 +1,18 @@
-FROM python:3.12-slim
+FROM node:22-bookworm-slim AS frontend-build
+WORKDIR /src/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
-RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
-
+FROM python:3.11-slim AS app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    METADATA_ENGINE=postgres
 WORKDIR /app
-
-COPY backend/requirements.txt ./backend/
-RUN pip install --no-cache-dir -r ./backend/requirements.txt
-
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm install
-
-COPY . .
-RUN cd frontend && npm run build
-
-EXPOSE 3000 8000
-
-CMD ["sh", "-c", "cd backend && python run.py & cd frontend && npm run preview -- --host 0.0.0.0 --port 3000"]
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/ ./
+COPY --from=frontend-build /src/frontend/../backend/frontend_dist ./frontend_dist
+EXPOSE 8000
+CMD ["python", "run.py"]

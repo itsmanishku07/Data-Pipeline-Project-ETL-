@@ -64,12 +64,15 @@ class Settings(BaseModel):
     MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "dataflow_metadata")
 
     # PostgreSQL Metadata Storage Config
-    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
-    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
-    POSTGRES_DATABASE: str = os.getenv("POSTGRES_DATABASE", "dataflow_metadata")
+    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", os.getenv("PGHOST", "localhost"))
+    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", os.getenv("PGPORT", "5432")))
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", os.getenv("PGUSER", "postgres"))
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", os.getenv("PGPASSWORD", ""))
+    POSTGRES_DATABASE: str = os.getenv("POSTGRES_DATABASE", os.getenv("PGDATABASE", "dataflow_metadata"))
     POSTGRES_SCHEMA: str = os.getenv("POSTGRES_SCHEMA", "public")
+    POSTGRES_SEARCH_PATH: str = os.getenv("POSTGRES_SEARCH_PATH", "")
+    LAKEBASE_MODE: bool = os.getenv("LAKEBASE_MODE", "false").strip().lower() in {"1", "true", "yes"}
+    LAKEBASE_ENDPOINT: str = os.getenv("LAKEBASE_ENDPOINT", "")
 
     def get_mysql_metadata_url(self) -> str:
         user = urllib.parse.quote_plus(self.MYSQL_USER)
@@ -79,7 +82,15 @@ class Settings(BaseModel):
     def get_postgres_metadata_url(self) -> str:
         user = urllib.parse.quote_plus(self.POSTGRES_USER)
         pwd = f":{urllib.parse.quote_plus(self.POSTGRES_PASSWORD)}" if self.POSTGRES_PASSWORD else ""
-        return f"postgresql+psycopg2://{user}{pwd}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DATABASE}"
+        query = f"?sslmode={urllib.parse.quote_plus(os.getenv('PGSSLMODE', 'require'))}" if os.getenv("PGSSLMODE") or self.POSTGRES_HOST != "localhost" else ""
+        return f"postgresql+psycopg2://{user}{pwd}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DATABASE}{query}"
+
+    def get_lakebase_metadata_url(self) -> str:
+        """Build a password-free Lakebase URL; the SDK supplies a short-lived OAuth token per connection."""
+        user = urllib.parse.quote_plus(self.POSTGRES_USER)
+        database = urllib.parse.quote_plus(self.POSTGRES_DATABASE)
+        sslmode = urllib.parse.quote_plus(os.getenv("PGSSLMODE", "require"))
+        return f"postgresql+psycopg2://{user}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{database}?sslmode={sslmode}"
 
     def get_active_metadata_url(self) -> str:
         if self.METADATA_ENGINE == "postgres":

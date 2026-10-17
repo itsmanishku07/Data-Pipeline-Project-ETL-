@@ -1,20 +1,11 @@
 import axios from 'axios';
 
-// Dynamically resolve Backend API Base URL from VITE_API_BASE_URL env variable
-const resolveApiBaseUrl = () => {
-  const envUrl = import.meta.env.VITE_API_BASE_URL;
-  if (!envUrl) {
-    return '/api';
-  }
-  const clean = envUrl.trim().replace(/\/+$/, '');
-  // If the user configured root URL (e.g. https://my-backend.vercel.app), append /api
-  if (!clean.endsWith('/api')) {
-    return `${clean}/api`;
-  }
-  return clean;
-};
-
-export const API_BASE_URL = resolveApiBaseUrl();
+// The UI is served by FastAPI in production, so use same-origin API paths.
+// An optional explicit URL remains useful when running the frontend separately in development.
+const configuredApiUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '');
+export const API_BASE_URL = configuredApiUrl
+  ? (configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`)
+  : '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,

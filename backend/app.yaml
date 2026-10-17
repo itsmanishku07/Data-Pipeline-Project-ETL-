@@ -1,0 +1,26 @@
+command:
+  - python
+  - run.py
+env:
+  # `postgres` must also be added as a Lakebase Autoscaling database resource
+  # in the Databricks Apps UI (Can connect and create). That resource injects
+  # PGHOST, PGPORT, PGUSER, PGDATABASE, and PGSSLMODE. Databricks injects the
+  # app service-principal identity used by WorkspaceClient; never hardcode tokens.
+  - name: METADATA_ENGINE
+    value: postgres
+  - name: LAKEBASE_MODE
+    value: "true"
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+  - name: POSTGRES_SCHEMA
+    value: dataflow_studio
+  - name: POSTGRES_SEARCH_PATH
+    value: dataflow_studio,public
+  - name: DB_POOL_SIZE
+    value: "3"
+  - name: DB_MAX_OVERFLOW
+    value: "2"
+  - name: DB_POOL_RECYCLE
+    value: "1800"
+  - name: ENABLE_IN_PROCESS_SCHEDULER
+    value: "true"
