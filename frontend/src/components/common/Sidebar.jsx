@@ -12,7 +12,8 @@ import {
   Moon, 
   X,
   PanelLeftClose,
-  Settings
+  Settings,
+  BookOpen
 } from 'lucide-react';
 
 const navItems = [
@@ -57,13 +58,6 @@ const navItems = [
     description: 'Job DAG & File Exports',
     icon: PlayCircle,
     badge: 'Runner'
-  },
-  { 
-    id: 6, 
-    label: 'History & Logs', 
-    description: 'MySQL Metadata & Audit',
-    icon: History,
-    badge: 'Store'
   },
   { 
     id: 7, 
@@ -182,7 +176,7 @@ export const Sidebar = ({
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentStep === item.id;
-              const isAccessible = item.id === 0 || item.id === 6 || item.id === 7 || item.id <= Math.max(currentStep, maxStepReached);
+               const isAccessible = item.id === 0 || item.id === 7 || item.id <= Math.max(currentStep, maxStepReached);
 
               return (
                 <button
@@ -227,8 +221,32 @@ export const Sidebar = ({
             })}
           </div>
 
-          {/* Sidebar Footer: ONLY option to open Settings */}
+          {/* Utility pages */}
           <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleItemClick(9)}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors mb-1 ${
+                currentStep === 9
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100'
+              }`}
+            >
+              <BookOpen className="w-4 h-4 shrink-0" />
+              <span>Documentation</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleItemClick(6)}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors mb-1 ${
+                currentStep === 6
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100'
+              }`}
+            >
+              <History className="w-4 h-4 shrink-0" />
+              <span>History &amp; Logs</span>
+            </button>
             <button
               type="button"
               onClick={() => handleItemClick(8)}

@@ -23,6 +23,8 @@ class StagingService:
         flow = CatalogDB.get_flow(request.flow_id) if request.flow_id else None
         last_wm = flow.get("last_watermark_value") if flow else None
         sync_mode = request.sync_mode or (flow.get("sync_mode") if flow else "full") or "full"
+        if sync_mode == "snapshot_detect":
+            sync_mode = "full"
         watermark_col = request.watermark_column or (flow.get("watermark_column") if flow else "aud_last_update") or "aud_last_update"
         pk = request.primary_key or (flow.get("primary_key") if flow else None)
 
@@ -36,6 +38,9 @@ class StagingService:
         # 2. Apply user-defined type casting rules if specified
         if request.cast_rules:
             df_staged, cast_logs = apply_type_casting(df_raw, request.cast_rules)
+            cast_errors = [message for message in cast_logs if message.startswith("Error casting")]
+            if cast_errors:
+                raise ValueError("Type casting failed: " + "; ".join(cast_errors))
         else:
             df_staged = df_raw.copy()
 
@@ -86,7 +91,7 @@ class StagingService:
         # 7. Update flow watermark & source_request if linked
         if request.flow_id:
             flow_updates = {
-                "sync_mode": sync_mode,
+                "sync_mode": request.sync_mode or (flow.get("sync_mode") if flow else sync_mode),
                 "watermark_column": watermark_col,
                 "primary_key": pk,
                 "source_request": request.source_request.dict() if hasattr(request.source_request, "dict") else request.source_request

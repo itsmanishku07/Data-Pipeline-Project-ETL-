@@ -79,11 +79,44 @@ const OPERATION_CATEGORIES = [
         badge: 'Exclude'
       },
       {
+        id: 'cast_type',
+        label: 'Change Data Type',
+        subtitle: 'Convert a column to a selected data type',
+        icon: Type,
+        badge: 'Cast'
+      },
+      {
         id: 'rename_column',
         label: 'Rename Column',
         subtitle: 'Change column name in schema',
         icon: Edit2,
         badge: 'Rename'
+      }
+    ]
+  },
+  {
+    category: 'Data Cleaning',
+    items: [
+      {
+        id: 'fill_na',
+        label: 'Fill Missing Values',
+        subtitle: 'Replace nulls with a value or column statistic',
+        icon: Sparkles,
+        badge: 'Fill'
+      },
+      {
+        id: 'drop_na',
+        label: 'Remove Rows With Nulls',
+        subtitle: 'Drop rows with missing values in selected or all columns',
+        icon: Trash2,
+        badge: 'Nulls'
+      },
+      {
+        id: 'deduplicate',
+        label: 'Remove Duplicates',
+        subtitle: 'Keep one row per selected key or distinct full row',
+        icon: CheckSquare,
+        badge: 'Unique'
       }
     ]
   },
@@ -488,6 +521,16 @@ export const TransformationStudioView = ({
       return `Drop ${count} Column${count === 1 ? '' : 's'}: [${sample}${count > 3 ? '...' : ''}]`;
     } else if (type === 'filter') {
       return `Filter: ${p.condition || `${ds?.columns?.[0]?.name} IS NOT NULL`}`;
+    } else if (type === 'drop_na') {
+      const subset = p.columns?.length ? ` in ${p.columns.join(', ')}` : ' in any column';
+      return `Remove rows with nulls${subset} (${p.how || 'any'})`;
+    } else if (type === 'deduplicate') {
+      const keys = p.columns?.length ? p.columns.join(', ') : 'all columns';
+      return `Remove duplicates by ${keys} (keep ${p.keep || 'first'})`;
+    } else if (type === 'cast_type') {
+      return `Cast ${p.column || 'column'} to ${p.target_type || 'StringType'}`;
+    } else if (type === 'fill_na') {
+      return `Fill nulls in ${p.column || 'all columns'} (${p.strategy || 'constant'})`;
     } else if (type === 'join') {
       const targetDs = allDatasets.find((d) => d.id === p.target_dataset_id);
       const howUpper = (p.how || 'inner').toUpperCase();
@@ -524,6 +567,7 @@ export const TransformationStudioView = ({
       setTimeout(() => setSaveSuccessMsg(null), 3500);
     } catch (err) {
       console.warn('Auto-saving flow rules error:', err);
+      setErrorMsg(extractErrorMessage(err, 'Failed to save transformation rules.'));
     }
   };
 
@@ -620,6 +664,16 @@ export const TransformationStudioView = ({
       setParams({ columns: availCols.map((c) => c.name) });
     } else if (newType === 'drop_columns') {
       setParams({ columns: [] });
+    } else if (newType === 'drop_na') {
+      setParams({ columns: [], how: 'any' });
+    } else if (newType === 'fill_na') {
+      const cols = getAvailableColumns();
+      setParams({ column: cols[0]?.name || '', strategy: 'constant', value: '' });
+    } else if (newType === 'deduplicate') {
+      setParams({ columns: [], keep: 'first' });
+    } else if (newType === 'cast_type') {
+      const cols = getAvailableColumns();
+      setParams({ column: cols[0]?.name || '', target_type: 'StringType' });
     } else if (newType === 'aggregate') {
       setParams({
         group_by: [],
@@ -661,6 +715,22 @@ export const TransformationStudioView = ({
       p.columns = p.columns && p.columns.length > 0 ? p.columns : currentCols.map((c) => c.name);
     } else if (ruleType === 'drop_columns') {
       p.columns = p.columns && p.columns.length > 0 ? p.columns : [currentCols[0]?.name].filter(Boolean);
+    } else if (ruleType === 'drop_na') {
+      p.columns = p.columns || [];
+      p.how = p.how || 'any';
+    } else if (ruleType === 'fill_na') {
+      p.strategy = p.strategy || 'constant';
+      if (p.column && !currentCols.some((column) => column.name === p.column)) {
+        setErrorMsg('Choose a valid column to fill.');
+        return;
+      }
+      if (p.strategy === 'constant' && !p.column && (p.value === undefined || p.value === '')) {
+        setErrorMsg('Enter a fill value, or select a column to fill.');
+        return;
+      }
+    } else if (ruleType === 'deduplicate') {
+      p.columns = p.columns || [];
+      p.keep = p.keep || 'first';
     } else if (ruleType === 'filter') {
       p.condition = p.condition || `${currentCols[0]?.name || 'id'} IS NOT NULL`;
     } else if (ruleType === 'join') {
@@ -694,6 +764,13 @@ export const TransformationStudioView = ({
     } else if (ruleType === 'string_transform') {
       p.column = p.column || currentCols[0]?.name;
       p.operation = p.operation || 'upper';
+    } else if (ruleType === 'cast_type') {
+      p.column = p.column || currentCols[0]?.name;
+      p.target_type = p.target_type || 'StringType';
+      if (!p.column || !currentCols.some((column) => column.name === p.column)) {
+        setErrorMsg('Choose a valid column to cast.');
+        return;
+      }
     } else if (ruleType === 'rename_column') {
       p.old_name = p.old_name || currentCols[0]?.name;
       p.new_name = p.new_name || `${p.old_name}_new`;
@@ -729,7 +806,6 @@ export const TransformationStudioView = ({
 
     setParams({});
     // Auto-save immediately to database
-    autoSaveRules(updatedRules);
     autoSaveRules(updatedRules);
   };
 
@@ -918,6 +994,15 @@ export const TransformationStudioView = ({
         } else if (r.rule_type === 'drop_columns') {
           const cols = (r.params?.columns || []).map((c) => `'${c}'`).join(', ');
           lines.push(`df = df.drop(${cols})`);
+        } else if (r.rule_type === 'drop_na') {
+          const cols = r.params?.columns || [];
+          lines.push(`df = df.dropna(subset=${cols.length ? JSON.stringify(cols) : 'None'}, how='${r.params?.how || 'any'}')`);
+        } else if (r.rule_type === 'deduplicate') {
+          const cols = r.params?.columns || [];
+          lines.push(`df = df.dropDuplicates(${cols.length ? JSON.stringify(cols) : 'None'})`);
+        } else if (r.rule_type === 'cast_type') {
+          const typeMap = { StringType: 'StringType()', IntegerType: 'IntegerType()', LongType: 'LongType()', DoubleType: 'DoubleType()', BooleanType: 'BooleanType()', DateType: 'DateType()', TimestampType: 'TimestampType()' };
+          lines.push(`df = df.withColumn('${r.params?.column}', F.col('${r.params?.column}').cast(${typeMap[r.params?.target_type] || 'StringType()'}))`);
         } else if (r.rule_type === 'aggregate') {
           const grp = (r.params?.group_by || []).map((c) => `'${c}'`).join(', ');
           const aggs = (r.params?.aggregations || []).map((a) => {
@@ -997,6 +1082,23 @@ export const TransformationStudioView = ({
       } else if (r.rule_type === 'drop_columns') {
         const cols = (r.params?.columns || []).map((c) => `"${c}"`).join(', ');
         ctes.push(`${cte} AS (\n    SELECT * EXCLUDE (${cols}) FROM ${prev}\n)`);
+      } else if (r.rule_type === 'drop_na') {
+        const cols = r.params?.columns || [];
+        const condition = cols.length
+          ? cols.map((col) => `"${col}" IS NOT NULL`).join((r.params?.how || 'any') === 'all' ? ' OR ' : ' AND ')
+          : '*';
+        ctes.push(`${cte} AS (\n    SELECT * FROM ${prev}${condition === '*' ? '' : `\n    WHERE ${condition}`}\n)`);
+      } else if (r.rule_type === 'deduplicate') {
+        const cols = r.params?.columns || [];
+        const partition = cols.length ? cols.map((col) => `"${col}"`).join(', ') : '*';
+        const keep = r.params?.keep || 'first';
+        const rowNumber = `ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY (SELECT 1))`;
+        const predicate = keep === 'last' ? '__rn = 1' : keep === 'none' ? '__rn = 1 AND __dup_count = 1' : '__rn = 1';
+        ctes.push(`${cte} AS (\n    SELECT * EXCLUDE (__rn, __dup_count) FROM (\n        SELECT *, ${rowNumber} AS __rn, COUNT(*) OVER (PARTITION BY ${partition}) AS __dup_count FROM ${prev}\n    ) WHERE ${predicate}\n)`);
+      } else if (r.rule_type === 'cast_type') {
+        const col = r.params?.column;
+        const target = (r.params?.target_type || 'StringType').replace('Type', '').toUpperCase();
+        ctes.push(`${cte} AS (\n    SELECT * REPLACE (CAST("${col}" AS ${target}) AS "${col}") FROM ${prev}\n)`);
       } else if (r.rule_type === 'aggregate') {
         const grp = (r.params?.group_by || []).map((c) => `"${c}"`).join(', ');
         const aggs = (r.params?.aggregations || []).map((a) => {
@@ -1680,6 +1782,111 @@ export const TransformationStudioView = ({
                         </button>
                       ))}
                     </div>
+                  </div>
+                );
+              })()}
+
+              {(ruleType === 'drop_na' || ruleType === 'deduplicate') && (() => {
+                const allCols = getAvailableColumns(editingRuleId);
+                const selectedCols = params.columns || [];
+                const toggleColumn = (name) => setParams({
+                  ...params,
+                  columns: selectedCols.includes(name)
+                    ? selectedCols.filter((column) => column !== name)
+                    : [...selectedCols, name],
+                });
+
+                return (
+                  <div className="space-y-3 p-3 bg-zinc-50/50 dark:bg-zinc-950 rounded-md border border-zinc-200 dark:border-zinc-800 animate-fadeIn">
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                      {ruleType === 'drop_na'
+                        ? 'Choose columns to check. Leave empty to check every column.'
+                        : 'Choose duplicate keys. Leave empty to compare complete rows.'}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {allCols.map((col) => (
+                        <label key={col.name} className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs cursor-pointer">
+                          <input type="checkbox" checked={selectedCols.includes(col.name)} onChange={() => toggleColumn(col.name)} />
+                          <span className="font-mono">{col.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {ruleType === 'drop_na' ? (
+                      <div className="space-y-1">
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 font-medium">Remove row when</label>
+                        <select value={params.how || 'any'} onChange={(e) => setParams({ ...params, how: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs">
+                          <option value="any">Any checked column is null</option>
+                          <option value="all">All checked columns are null</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 font-medium">Keep duplicate row</label>
+                        <select value={params.keep || 'first'} onChange={(e) => setParams({ ...params, keep: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs">
+                          <option value="first">First occurrence</option>
+                          <option value="last">Last occurrence</option>
+                          <option value="none">Remove all duplicated occurrences</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {ruleType === 'cast_type' && (() => {
+                const cols = getAvailableColumns(editingRuleId);
+                const targetTypes = ['StringType', 'IntegerType', 'LongType', 'DoubleType', 'BooleanType', 'DateType', 'TimestampType'];
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Column</label>
+                      <select value={params.column || cols[0]?.name || ''} onChange={(e) => setParams({ ...params, column: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono">
+                        {cols.map((col) => <option key={col.name} value={col.name}>{col.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Target Type</label>
+                      <select value={params.target_type || 'StringType'} onChange={(e) => setParams({ ...params, target_type: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono">
+                        {targetTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </div>
+                    {['DateType', 'TimestampType'].includes(params.target_type) && (
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Input Format (optional)</label>
+                        <input type="text" value={params.format || ''} onChange={(e) => setParams({ ...params, format: e.target.value })} placeholder={params.target_type === 'DateType' ? 'e.g. yyyy-MM-dd' : 'e.g. yyyy-MM-dd HH:mm:ss'} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono" />
+                        <p className="mt-1 text-[10px] text-zinc-500">Invalid non-null values fail preview rather than silently becoming null.</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {ruleType === 'fill_na' && (() => {
+                const cols = getAvailableColumns(editingRuleId);
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Column (optional)</label>
+                      <select value={params.column || ''} onChange={(e) => setParams({ ...params, column: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono">
+                        <option value="">All columns</option>
+                        {cols.map((col) => <option key={col.name} value={col.name}>{col.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Strategy</label>
+                      <select value={params.strategy || 'constant'} onChange={(e) => setParams({ ...params, strategy: e.target.value })} className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs">
+                        <option value="constant">Constant value</option>
+                        <option value="mean" disabled={!params.column}>Mean (numeric)</option>
+                        <option value="mode" disabled={!params.column}>Most common value</option>
+                        <option value="ffill" disabled={!params.column}>Previous value</option>
+                      </select>
+                    </div>
+                    {(!params.strategy || params.strategy === 'constant') && (
+                      <div>
+                        <label className="block text-xs text-zinc-700 dark:text-zinc-300 mb-1 font-medium">Fill value</label>
+                        <input type="text" value={params.value ?? ''} onChange={(e) => setParams({ ...params, value: e.target.value })} placeholder="Replacement value" className="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs" />
+                      </div>
+                    )}
                   </div>
                 );
               })()}

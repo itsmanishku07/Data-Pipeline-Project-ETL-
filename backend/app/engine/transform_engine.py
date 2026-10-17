@@ -30,10 +30,10 @@ class TransformationEngine:
             error_msg = None
             
             try:
-                current_df = TransformationEngine._apply_rule(current_df, rule)
+                next_df = TransformationEngine._apply_rule(current_df.copy(), rule)
+                current_df = next_df
             except Exception as e:
                 error_msg = str(e)
-                # Keep current_df to prevent full crash and show error on step
                 
             step_summaries.append({
                 "step_index": idx + 1,
@@ -48,6 +48,13 @@ class TransformationEngine:
             })
 
         exec_time_ms = round((time.time() - start_time) * 1000, 2)
+        failed_steps = [step for step in step_summaries if step["status"] == "FAILED"]
+        if failed_steps:
+            details = "; ".join(
+                f"Step {step['step_index']} ({step['rule_type']}): {step['error']}"
+                for step in failed_steps
+            )
+            raise ValueError(f"Transformation execution failed: {details}")
         return current_df, step_summaries, exec_time_ms
 
     @staticmethod
@@ -57,31 +64,39 @@ class TransformationEngine:
 
         if rtype == RuleType.FILTER:
             condition = params.get("condition", "")
-            if condition:
-                # Use DuckDB for SQL WHERE filtering
-                con = duckdb.connect(":memory:")
+            if not condition or not condition.strip():
+                raise ValueError("Filter condition is required.")
+            with duckdb.connect(":memory:") as con:
                 con.register("current_df", df)
-                query = f"SELECT * FROM current_df WHERE {condition}"
-                df = con.execute(query).df()
-                con.close()
+                df = con.execute(f"SELECT * FROM current_df WHERE {condition}").df()
 
         elif rtype == RuleType.DROP_COLUMNS:
             cols_to_drop = params.get("columns", [])
-            cols_exist = [c for c in cols_to_drop if c in df.columns]
-            if cols_exist:
-                df = df.drop(columns=cols_exist)
+            missing = [c for c in cols_to_drop if c not in df.columns]
+            if missing:
+                raise KeyError(f"Column(s) to drop not found: {', '.join(missing)}")
+            if cols_to_drop:
+                df = df.drop(columns=cols_to_drop)
 
         elif rtype == RuleType.SELECT_COLUMNS:
             cols_to_keep = params.get("columns", [])
-            cols_exist = [c for c in cols_to_keep if c in df.columns]
-            if cols_exist:
-                df = df[cols_exist]
+            if not cols_to_keep:
+                raise ValueError("Select Columns requires at least one column.")
+            missing = [c for c in cols_to_keep if c not in df.columns]
+            if missing:
+                raise KeyError(f"Selected column(s) not found: {', '.join(missing)}")
+            df = df[cols_to_keep]
 
         elif rtype == RuleType.RENAME_COLUMN:
             old_name = params.get("old_name")
             new_name = params.get("new_name")
-            if old_name and new_name and old_name in df.columns:
-                df = df.rename(columns={old_name: new_name})
+            if not old_name or not new_name:
+                raise ValueError("Both old_name and new_name are required.")
+            if old_name not in df.columns:
+                raise KeyError(f"Column '{old_name}' not found.")
+            if new_name in df.columns and new_name != old_name:
+                raise ValueError(f"Column '{new_name}' already exists.")
+            df = df.rename(columns={old_name: new_name})
 
         elif rtype == RuleType.FILL_NA:
             col = params.get("column")
@@ -91,23 +106,37 @@ class TransformationEngine:
             if col and col in df.columns:
                 if strategy == "mean" and pd.api.types.is_numeric_dtype(df[col]):
                     df[col] = df[col].fillna(df[col].mean())
+                elif strategy == "mean":
+                    raise ValueError("Mean fill strategy requires a numeric column.")
                 elif strategy == "mode":
                     mode_val = df[col].mode()
                     if not mode_val.empty:
                         df[col] = df[col].fillna(mode_val[0])
                 elif strategy == "ffill":
                     df[col] = df[col].ffill()
-                else:
+                elif strategy == "constant":
+                    if fill_value is None:
+                        raise ValueError("Constant fill strategy requires a fill value.")
                     df[col] = df[col].fillna(fill_value)
+                else:
+                    raise ValueError(f"Unsupported fill strategy '{strategy}'.")
+            elif col:
+                raise KeyError(f"Column '{col}' not found.")
             elif not col and fill_value is not None:
                 df = df.fillna(fill_value)
+            else:
+                raise ValueError("Fill Nulls requires a column or a fill value for all columns.")
 
         elif rtype == RuleType.DROP_NA:
             cols = params.get("columns", [])
             how = params.get("how", "any") # any, all
+            if how not in ("any", "all"):
+                raise ValueError("Drop Nulls 'how' must be 'any' or 'all'.")
             if cols:
-                cols_exist = [c for c in cols if c in df.columns]
-                df = df.dropna(subset=cols_exist, how=how)
+                missing = [c for c in cols if c not in df.columns]
+                if missing:
+                    raise KeyError(f"Column(s) not found: {', '.join(missing)}")
+                df = df.dropna(subset=cols, how=how)
             else:
                 df = df.dropna(how=how)
 
@@ -115,7 +144,7 @@ class TransformationEngine:
             col = params.get("column")
             op = params.get("operation") # trim, upper, lower, title, regex_replace
             if col and col in df.columns:
-                s = df[col].astype(str)
+                s = df[col].astype("string")
                 if op == "trim":
                     df[col] = s.str.strip()
                 elif op == "upper":
@@ -128,6 +157,10 @@ class TransformationEngine:
                     pattern = params.get("pattern", "")
                     replacement = params.get("replacement", "")
                     df[col] = s.str.replace(pattern, replacement, regex=True)
+                else:
+                    raise ValueError(f"Unsupported string operation '{op}'.")
+            else:
+                raise KeyError(f"Column '{col}' not found." if col else "String transform requires a column.")
 
         elif rtype == RuleType.CAST_TYPE:
             col = params.get("column")
@@ -135,23 +168,37 @@ class TransformationEngine:
             fmt = params.get("format")
             if col and target_type:
                 cast_rule = CastColumnRule(column_name=col, target_spark_type=target_type, format=fmt)
-                df, _ = apply_type_casting(df, [cast_rule])
+                df, cast_logs = apply_type_casting(df, [cast_rule])
+                errors = [message for message in cast_logs if message.startswith("Error casting")]
+                if errors:
+                    raise ValueError("; ".join(errors))
+            else:
+                raise ValueError("Cast Type requires a column and target type.")
 
         elif rtype == RuleType.DERIVED_COLUMN:
             col_name = params.get("column_name")
             expression = params.get("expression") # e.g. "unit_price * quantity", "ROUND(amount * 0.1, 2)"
             if col_name and expression:
-                con = duckdb.connect(":memory:")
-                con.register("current_df", df)
-                query = f"SELECT *, ({expression}) AS \"{col_name}\" FROM current_df"
-                df = con.execute(query).df()
-                con.close()
+                with duckdb.connect(":memory:") as con:
+                    con.register("current_df", df)
+                    query = f"SELECT * EXCLUDE (\"{col_name}\"), ({expression}) AS \"{col_name}\" FROM current_df" if col_name in df.columns else f"SELECT *, ({expression}) AS \"{col_name}\" FROM current_df"
+                    df = con.execute(query).df()
+            else:
+                raise ValueError("Derived Column requires a name and expression.")
 
         elif rtype == RuleType.AGGREGATE:
             group_by_cols = params.get("group_by", [])
             aggs = params.get("aggregations", []) # list of {column, op, alias}
             
             if aggs:
+                missing = [c for c in group_by_cols if c not in df.columns]
+                missing.extend(a.get("column") for a in aggs if a.get("op", "sum").upper() != "COUNT" and a.get("column") not in df.columns)
+                if missing:
+                    raise KeyError(f"Aggregation column(s) not found: {', '.join(str(c) for c in missing)}")
+                supported_ops = {"SUM", "AVG", "MEAN", "COUNT", "MIN", "MAX", "COUNT_DISTINCT"}
+                invalid_ops = [a.get("op", "sum").upper() for a in aggs if a.get("op", "sum").upper() not in supported_ops]
+                if invalid_ops:
+                    raise ValueError(f"Unsupported aggregation operation(s): {', '.join(invalid_ops)}")
                 select_parts = [f"\"{c}\"" for c in group_by_cols]
                 for agg in aggs:
                     col = agg.get("column")
@@ -165,10 +212,11 @@ class TransformationEngine:
                 group_clause = f"GROUP BY {', '.join([f'\"{c}\"' for c in group_by_cols])}" if group_by_cols else ""
                 query = f"SELECT {', '.join(select_parts)} FROM current_df {group_clause}"
                 
-                con = duckdb.connect(":memory:")
-                con.register("current_df", df)
-                df = con.execute(query).df()
-                con.close()
+                with duckdb.connect(":memory:") as con:
+                    con.register("current_df", df)
+                    df = con.execute(query).df()
+            else:
+                raise ValueError("Aggregate requires at least one aggregation.")
 
         elif rtype == RuleType.WINDOW_FUNCTION:
             func_type = (params.get("function_type") or "row_number").upper()
@@ -178,6 +226,26 @@ class TransformationEngine:
             order_by = params.get("order_by", "")
             order_dir = (params.get("order_direction") or "ASC").upper()
             offset = params.get("offset", 1)
+
+            allowed_functions = {"ROW_NUMBER", "RANK", "DENSE_RANK", "LEAD", "LAG", "SUM", "AVG", "MIN", "MAX", "FIRST_VALUE", "LAST_VALUE"}
+            if func_type not in allowed_functions:
+                raise ValueError(f"Unsupported window function '{func_type}'.")
+            needed_cols = list(partition_by)
+            if order_by:
+                needed_cols.append(order_by)
+            if val_col and func_type not in {"ROW_NUMBER", "RANK", "DENSE_RANK"}:
+                needed_cols.append(val_col)
+            missing = [c for c in needed_cols if c not in df.columns]
+            if missing:
+                raise KeyError(f"Window function column(s) not found: {', '.join(missing)}")
+            if order_dir not in {"ASC", "DESC"}:
+                raise ValueError("Window order_direction must be ASC or DESC.")
+            try:
+                offset = int(offset)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Window offset must be an integer.") from exc
+            if offset < 0:
+                raise ValueError("Window offset must be non-negative.")
 
             if func_type in ["ROW_NUMBER", "RANK", "DENSE_RANK"]:
                 func_expr = f"{func_type}()"
@@ -197,15 +265,21 @@ class TransformationEngine:
             over_clause = f"OVER ({' '.join(over_parts)})"
             query = f"SELECT *, {func_expr} {over_clause} AS \"{target_col}\" FROM current_df"
 
-            con = duckdb.connect(":memory:")
-            con.register("current_df", df)
-            df = con.execute(query).df()
-            con.close()
+            with duckdb.connect(":memory:") as con:
+                con.register("current_df", df)
+                df = con.execute(query).df()
 
         elif rtype == RuleType.DEDUPLICATE:
             cols = params.get("columns", [])
-            cols_exist = [c for c in cols if c in df.columns] if cols else None
-            df = df.drop_duplicates(subset=cols_exist)
+            missing = [c for c in cols if c not in df.columns]
+            if missing:
+                raise KeyError(f"Deduplication column(s) not found: {', '.join(missing)}")
+            keep = params.get("keep", "first")
+            if keep == "none":
+                keep = False
+            if keep not in ("first", "last", False):
+                raise ValueError("Deduplicate keep must be 'first', 'last', or 'none'.")
+            df = df.drop_duplicates(subset=cols or None, keep=keep)
 
         elif rtype == RuleType.SPARK_SQL:
             sql_query = params.get("query", "")
@@ -213,10 +287,11 @@ class TransformationEngine:
                 # Normalize table aliases
                 sql_query = re.sub(r"\bdf\b", "current_df", sql_query, flags=re.IGNORECASE)
                 sql_query = re.sub(r"\bstaged_data\b", "current_df", sql_query, flags=re.IGNORECASE)
-                con = duckdb.connect(":memory:")
-                con.register("current_df", df)
-                df = con.execute(sql_query).df()
-                con.close()
+                with duckdb.connect(":memory:") as con:
+                    con.register("current_df", df)
+                    df = con.execute(sql_query).df()
+            else:
+                raise ValueError("Custom SQL query is required.")
 
         elif rtype == RuleType.JOIN:
             target_ds_id = params.get("target_dataset_id")
@@ -227,7 +302,11 @@ class TransformationEngine:
             suffix_right = params.get("suffix_right", "_joined")
             selected_columns = params.get("selected_columns", None)
 
-            if target_ds_id and left_on and right_on:
+            if how not in {"inner", "left", "right", "outer", "cross"}:
+                raise ValueError(f"Unsupported join type '{how}'.")
+            if not target_ds_id or (how != "cross" and (not left_on or not right_on)):
+                raise ValueError("Join requires a target dataset and join keys (except for cross joins).")
+            if target_ds_id:
                 target_ds_info = CatalogDB.get_staged_dataset(target_ds_id)
                 if not target_ds_info:
                     raise FileNotFoundError(f"Joined target dataset '{target_ds_id}' not found in catalog.")
@@ -242,11 +321,14 @@ class TransformationEngine:
 
                 # Filter target columns if specified
                 if selected_columns and isinstance(selected_columns, list):
-                    cols_to_keep = list(set([right_on] + [c for c in selected_columns if c in df_target.columns]))
+                    missing_selected = [c for c in selected_columns if c not in df_target.columns]
+                    if missing_selected:
+                        raise KeyError(f"Selected target column(s) not found: {', '.join(missing_selected)}")
+                    cols_to_keep = list(dict.fromkeys(([right_on] if right_on else []) + selected_columns))
                     df_target = df_target[cols_to_keep]
 
                 # Harmonize key types to prevent merge type mismatch
-                if df[left_on].dtype != df_target[right_on].dtype:
+                if how != "cross" and df[left_on].dtype != df_target[right_on].dtype:
                     try:
                         df_target[right_on] = df_target[right_on].astype(df[left_on].dtype)
                     except Exception:
@@ -254,7 +336,9 @@ class TransformationEngine:
                         df_target[right_on] = df_target[right_on].astype(str)
 
                 # Merge DataFrames cleanly
-                if left_on == right_on:
+                if how == "cross":
+                    df = df.merge(df_target, how="cross", suffixes=(suffix_left, suffix_right))
+                elif left_on == right_on:
                     df = df.merge(
                         df_target,
                         on=left_on,

@@ -618,6 +618,10 @@ export const SourceConnectorView = ({
     try {
       const req = buildRequest();
       const result = await DataFlowAPI.inspectSource(req, 100);
+      if (activeFlowId) {
+        await DataFlowAPI.updateFlow(activeFlowId, { source_request: req });
+        if (onRefreshFlows) await onRefreshFlows();
+      }
       onSourceInspected(req, result);
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Inspection failed');

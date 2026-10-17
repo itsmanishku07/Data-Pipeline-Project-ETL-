@@ -1,5 +1,6 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
 import pandas as pd
 import numpy as np
 from ..models.schemas import ColumnProfile, CastColumnRule, SparkDataTypeEnum
@@ -65,7 +66,7 @@ def profile_dataframe(df: pd.DataFrame) -> List[ColumnProfile]:
         # Ensure sample values are JSON serializable
         clean_samples = []
         for val in sample_vals:
-            if isinstance(val, (pd.Timestamp, datetime_type := type(pd.Timestamp.now()))):
+            if isinstance(val, (pd.Timestamp, datetime)):
                 clean_samples.append(val.isoformat())
             elif isinstance(val, (np.integer, int)):
                 clean_samples.append(int(val))
@@ -109,32 +110,37 @@ def apply_type_casting(df: pd.DataFrame, cast_rules: List[CastColumnRule]) -> Tu
     for rule in cast_rules:
         col = rule.column_name
         if col not in df_out.columns:
-            logs.append(f"Skipped column {col}: not found in dataset.")
+            logs.append(f"Error casting column '{col}': column not found in dataset.")
             continue
 
         target_type = rule.target_spark_type.strip()
         logs.append(f"Casting column '{col}' to {target_type}...")
 
         try:
-            if "Integer" in target_type:
-                if not pd.api.types.is_numeric_dtype(df_out[col]):
-                    clean_s = df_out[col].astype(str).str.replace(r"[^\d\-]", "", regex=True)
-                    df_out[col] = pd.to_numeric(clean_s, errors="coerce").astype("Int32")
-                else:
-                    df_out[col] = pd.to_numeric(df_out[col], errors="coerce").astype("Int32")
-            elif "Long" in target_type:
-                if not pd.api.types.is_numeric_dtype(df_out[col]):
-                    clean_s = df_out[col].astype(str).str.replace(r"[^\d\-]", "", regex=True)
-                    df_out[col] = pd.to_numeric(clean_s, errors="coerce").astype("Int64")
-                else:
-                    df_out[col] = pd.to_numeric(df_out[col], errors="coerce").astype("Int64")
-            elif "Double" in target_type or "Float" in target_type or "Decimal" in target_type:
-                if not pd.api.types.is_numeric_dtype(df_out[col]):
-                    clean_s = df_out[col].astype(str).str.replace(r"[^\d\.\-]", "", regex=True)
-                    df_out[col] = pd.to_numeric(clean_s, errors="coerce")
-                else:
-                    df_out[col] = pd.to_numeric(df_out[col], errors="coerce")
-            elif "Boolean" in target_type:
+            normalized_type = target_type.lower()
+            original = df_out[col]
+            non_null = original.notna()
+
+            if normalized_type in {"integertype", "integer", "int", "shorttype", "short"}:
+                converted = pd.to_numeric(original, errors="coerce")
+                if (converted[non_null].isna()).any():
+                    raise ValueError("one or more non-null values are not valid integers")
+                if ((converted.dropna() % 1) != 0).any():
+                    raise ValueError("one or more values contain a fractional part")
+                df_out[col] = converted.astype("Int32")
+            elif normalized_type in {"longtype", "long", "bigint"}:
+                converted = pd.to_numeric(original, errors="coerce")
+                if (converted[non_null].isna()).any():
+                    raise ValueError("one or more non-null values are not valid integers")
+                if ((converted.dropna() % 1) != 0).any():
+                    raise ValueError("one or more values contain a fractional part")
+                df_out[col] = converted.astype("Int64")
+            elif normalized_type in {"doubletype", "double", "floattype", "float", "decimaltype", "decimal"}:
+                converted = pd.to_numeric(original, errors="coerce")
+                if (converted[non_null].isna()).any():
+                    raise ValueError("one or more non-null values are not numeric")
+                df_out[col] = converted
+            elif normalized_type in {"booleantype", "boolean", "bool"}:
                 def to_bool(val):
                     if pd.isna(val):
                         return None
@@ -143,52 +149,52 @@ def apply_type_casting(df: pd.DataFrame, cast_rules: List[CastColumnRule]) -> Tu
                         return True
                     if s in ("false", "0", "no", "n", "f"):
                         return False
-                    return None
-                df_out[col] = df_out[col].apply(to_bool).astype("boolean")
-            elif "Date" in target_type:
+                    raise ValueError(f"'{val}' is not a recognized boolean value")
+                df_out[col] = original.apply(to_bool).astype("boolean")
+            elif normalized_type in {"datetype", "date"}:
                 if rule.format and rule.format.strip():
-                    fmt = (rule.format.strip()
-                           .replace("yyyy", "%Y")
-                           .replace("MM", "%m")
-                           .replace("dd", "%d"))
+                    fmt = _spark_datetime_format_to_python(rule.format.strip())
                     parsed = pd.to_datetime(df_out[col], format=fmt, errors="coerce")
-                    if not df_out[col].dropna().empty and parsed.dropna().empty:
-                        parsed = pd.to_datetime(df_out[col], errors="coerce")
+                    if (non_null & parsed.isna()).any():
+                        raise ValueError(f"some non-null values do not match date format '{rule.format}'")
                     df_out[col] = parsed.dt.date
                 else:
-                    df_out[col] = pd.to_datetime(df_out[col], errors="coerce").dt.date
-            elif "Timestamp" in target_type:
+                    parsed = pd.to_datetime(original, errors="coerce")
+                    if (non_null & parsed.isna()).any():
+                        raise ValueError("some non-null values are not valid dates")
+                    df_out[col] = parsed.dt.date
+            elif normalized_type in {"timestamptype", "timestamp"}:
                 if rule.format and rule.format.strip():
-                    fmt = (rule.format.strip()
-                           .replace("yyyy", "%Y")
-                           .replace("MM", "%m")
-                           .replace("dd", "%d")
-                           .replace("HH", "%H")
-                           .replace("mm", "%M")
-                           .replace("ss", "%S"))
+                    fmt = _spark_datetime_format_to_python(rule.format.strip())
                     parsed = pd.to_datetime(df_out[col], format=fmt, errors="coerce")
-                    if not df_out[col].dropna().empty and parsed.dropna().empty:
-                        parsed = pd.to_datetime(df_out[col], errors="coerce")
+                    if (non_null & parsed.isna()).any():
+                        raise ValueError(f"some non-null values do not match timestamp format '{rule.format}'")
                     df_out[col] = parsed
                 else:
-                    df_out[col] = pd.to_datetime(df_out[col], errors="coerce")
-            elif "String" in target_type:
-                df_out[col] = df_out[col].astype(str).replace({"nan": None, "None": None, "<NA>": None})
+                    parsed = pd.to_datetime(original, errors="coerce")
+                    if (non_null & parsed.isna()).any():
+                        raise ValueError("some non-null values are not valid timestamps")
+                    df_out[col] = parsed
+            elif normalized_type in {"stringtype", "string"}:
+                df_out[col] = original.astype("string")
+            else:
+                raise ValueError(f"Unsupported target type '{target_type}'.")
 
             # Check null handling fallback
             if rule.default_value is not None:
                 df_out[col] = df_out[col].fillna(rule.default_value)
-                
             logs.append(f"Successfully cast column '{col}' to {target_type}.")
         except Exception as e:
             logs.append(f"Error casting column '{col}' to {target_type}: {str(e)}")
-
-    # Guarantee aud_last_update is always present with valid UTC timestamps
-    if "aud_last_update" in df_out.columns:
-        from datetime import datetime
-        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        df_out["aud_last_update"] = df_out["aud_last_update"].fillna(now_iso)
-        # If any string 'NaT' or 'null' is present
-        df_out["aud_last_update"] = df_out["aud_last_update"].replace({"NaT": now_iso, "nan": now_iso, "<NA>": now_iso})
-            
     return df_out, logs
+
+
+def _spark_datetime_format_to_python(fmt: str) -> str:
+    """Translate common Spark/JVM date tokens to Python strptime tokens."""
+    tokens = {
+        "yyyy": "%Y", "yy": "%y", "MM": "%m", "dd": "%d",
+        "HH": "%H", "hh": "%I", "mm": "%M", "ss": "%S",
+        "SSS": "%f", "a": "%p",
+    }
+    pattern = re.compile("|".join(re.escape(token) for token in sorted(tokens, key=len, reverse=True)))
+    return pattern.sub(lambda match: tokens[match.group(0)], fmt)

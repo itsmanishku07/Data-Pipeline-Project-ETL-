@@ -397,6 +397,13 @@ class JobService:
                 if step.get("error"):
                     logs.append(f"    Warning: {step['error']}")
 
+            failed_steps = [step for step in step_summaries if step["status"] == "FAILED"]
+            if failed_steps:
+                failed_descriptions = "; ".join(
+                    f"{step['description']}: {step['error']}" for step in failed_steps
+                )
+                raise ValueError(f"Transformation rule(s) failed: {failed_descriptions}")
+
             logs.append(f"Transformation engine completed in {exec_time} ms.")
 
             # 3. Stage Output to MySQL Staging Table if requested (zero parquet disk files)
@@ -474,6 +481,9 @@ class JobService:
                     JobService._export_to_azure(df_out, dest.azure_dest, logs)
                 elif dest.destination_type in (DestinationTypeEnum.DATABRICKS, DestinationTypeEnum.DATABRICKS_CATALOG) and dest.databricks_dest:
                     JobService._export_to_databricks(df_out, dest.databricks_dest, logs)
+            if request.promote_snapshot_flow_id and request.destination_config and resolved_flow_id:
+                dest = request.destination_config
+                CatalogDB.update_flow(resolved_flow_id, {"destination_config": dest.dict() if hasattr(dest, "dict") else dest})
 
             # Record Ingestion & Transformation History
             CatalogDB.record_transformation(
@@ -505,6 +515,16 @@ class JobService:
                 "logs": logs
             })
             CatalogDB.save_job(job_dict)
+
+            if request.promote_snapshot_flow_id and request.source_snapshot is not None:
+                CatalogDB.save_flow_snapshot(
+                    request.promote_snapshot_flow_id,
+                    request.source_snapshot_columns or [],
+                    request.source_snapshot,
+                )
+                logs.append("Committed the detected source snapshot as the new comparison baseline.")
+                job_dict["logs"] = logs
+                CatalogDB.save_job(job_dict)
 
         except Exception as e:
             completed_at = datetime.utcnow()

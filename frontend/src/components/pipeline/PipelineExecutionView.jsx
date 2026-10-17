@@ -143,6 +143,42 @@ export const PipelineExecutionView = ({
   // Determine current active flow object
   const currentFlow = flows.find((f) => f.id === selectedFlowId) || null;
 
+  useEffect(() => {
+    const config = currentFlow?.destination_config;
+    if (!config) return;
+    setDestinationType(config.destination_type || 'database');
+    if (config.database_dest) {
+      const dest = config.database_dest;
+      setDbType(dest.db_type || 'mysql'); setDbHost(dest.host || 'localhost'); setDbPort(dest.port || 3306);
+      setDbName(dest.database || ''); setDbSchema(dest.schema_name || 'public'); setDbUser(dest.username || 'root');
+      setDbPassword(dest.password || ''); setDbTable(dest.table_name || ''); setDbWriteMode(dest.write_mode || 'replace');
+    }
+    if (config.databricks_dest) {
+      const dest = config.databricks_dest;
+      setDbxHost(dest.server_hostname || ''); setDbxHttpPath(dest.http_path || ''); setDbxToken(dest.access_token || '');
+      setDbxCatalog(dest.catalog || 'main'); setDbxSchema(dest.schema_name || 'default'); setDbxTable(dest.table_name || 'curated_output'); setDbxWriteMode(dest.write_mode || 'append');
+    }
+    if (config.s3_dest) {
+      const dest = config.s3_dest;
+      setS3Bucket(dest.bucket || ''); setS3Key(dest.key || ''); setS3Region(dest.region || 'us-east-1');
+      setS3AccessKey(dest.access_key || ''); setS3SecretKey(dest.secret_key || ''); setS3Format(dest.format || 'parquet');
+    }
+    if (config.azure_dest) {
+      const dest = config.azure_dest;
+      setAzureAccount(dest.account_name || ''); setAzureContainer(dest.container || ''); setAzurePath(dest.target_path || '');
+      setAzureKey(dest.account_key || ''); setAzureFormat(dest.format || 'parquet');
+    }
+  }, [currentFlow]);
+
+  const destinationConfigReady = (config) => {
+    if (!config) return false;
+    if (config.destination_type === 'database') return Boolean(config.database_dest);
+    if (config.destination_type === 'databricks' || config.destination_type === 'databricks_catalog') return Boolean(config.databricks_dest);
+    if (config.destination_type === 's3') return Boolean(config.s3_dest);
+    if (config.destination_type === 'azure' || config.destination_type === 'azure_lakehouse') return Boolean(config.azure_dest);
+    return config.destination_type === 'lakehouse';
+  };
+
   // Filter datasets belonging strictly to selected flow
   const flowDatasets = selectedFlowId 
     ? allStagedDatasets.filter((d) => d.flow_id === selectedFlowId)
@@ -276,6 +312,33 @@ export const PipelineExecutionView = ({
     }
   };
 
+  useEffect(() => {
+    if (!currentFlow?.destination_config) return;
+    const config = currentFlow.destination_config;
+    setDestinationType(config.destination_type || 'database');
+    if (config.database_dest) {
+      const dest = config.database_dest;
+      setDbType(dest.db_type || 'mysql'); setDbHost(dest.host || 'localhost'); setDbPort(dest.port || 3306);
+      setDbName(dest.database || ''); setDbSchema(dest.schema_name || 'public'); setDbUser(dest.username || 'root');
+      setDbPassword(dest.password || ''); setDbTable(dest.table_name || ''); setDbWriteMode(dest.write_mode || 'replace');
+    }
+    if (config.databricks_dest) {
+      const dest = config.databricks_dest;
+      setDbxHost(dest.server_hostname || ''); setDbxHttpPath(dest.http_path || ''); setDbxToken(dest.access_token || '');
+      setDbxCatalog(dest.catalog || 'main'); setDbxSchema(dest.schema_name || 'default'); setDbxTable(dest.table_name || 'curated_output'); setDbxWriteMode(dest.write_mode || 'append');
+    }
+    if (config.s3_dest) {
+      const dest = config.s3_dest;
+      setS3Bucket(dest.bucket || ''); setS3Key(dest.key || ''); setS3Region(dest.region || 'us-east-1');
+      setS3AccessKey(dest.access_key || ''); setS3SecretKey(dest.secret_key || ''); setS3Format(dest.format || 'parquet');
+    }
+    if (config.azure_dest) {
+      const dest = config.azure_dest;
+      setAzureAccount(dest.account_name || ''); setAzureContainer(dest.container || ''); setAzurePath(dest.target_path || '');
+      setAzureKey(dest.account_key || ''); setAzureFormat(dest.format || 'parquet');
+    }
+  }, [currentFlow]);
+
   const handleBrowseAzureDestFolders = async (targetPrefix = '') => {
     const acc = azureAccount.trim() || 'datalakeprod';
     const cont = azureContainer.trim() || 'curated';
@@ -403,6 +466,10 @@ export const PipelineExecutionView = ({
         export_format: exportFormat,
         destination_config: destConfig,
       };
+
+      if (selectedFlowId && destinationConfigReady(destConfig)) {
+        await DataFlowAPI.updateFlow(selectedFlowId, { destination_config: destConfig });
+      }
 
       const job = await DataFlowAPI.executePipeline(req);
       setActiveJob(job);

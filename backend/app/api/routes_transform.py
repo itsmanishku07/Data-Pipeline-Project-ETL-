@@ -30,6 +30,11 @@ def preview_transformation(request: PreviewTransformRequest, background_tasks: B
         # Apply transformation rules
         df_transformed, step_summaries, exec_time = TransformationEngine.execute_rules(df, request.rules)
 
+        failed_steps = [step for step in step_summaries if step.get("status") == "FAILED"]
+        if failed_steps:
+            details = "; ".join(step.get("error", "Rule failed") for step in failed_steps)
+            raise HTTPException(status_code=422, detail=f"Transformation preview failed: {details}")
+
         column_profiles = profile_dataframe(df_transformed)
         preview_rows = df_transformed.head(request.limit).to_dict(orient="records")
         for r in preview_rows:

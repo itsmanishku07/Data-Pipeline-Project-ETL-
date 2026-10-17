@@ -49,13 +49,16 @@ export const FlowsOverviewTrackerView = ({
   const [newFlowName, setNewFlowName] = useState('');
   const [newFlowCategory, setNewFlowCategory] = useState('General');
   const [newFlowDesc, setNewFlowDesc] = useState('');
-  const [newSyncMode, setNewSyncMode] = useState('incremental_merge');
+  const [newSyncMode, setNewSyncMode] = useState('snapshot_detect');
   const [newWatermarkCol, setNewWatermarkCol] = useState('aud_last_update');
   const [newPrimaryKey, setNewPrimaryKey] = useState('id');
   const [creatingFlow, setCreatingFlow] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const [syncingFlowId, setSyncingFlowId] = useState(null);
+  const [detectingFlowId, setDetectingFlowId] = useState(null);
+  const [changeReports, setChangeReports] = useState({});
+  const [runningDetectedFlowId, setRunningDetectedFlowId] = useState(null);
 
   // Delete Confirmation Modal State
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({
@@ -145,14 +148,14 @@ export const FlowsOverviewTrackerView = ({
         description: newFlowDesc.trim(),
         sync_mode: newSyncMode,
         watermark_column: newWatermarkCol.trim() || 'aud_last_update',
-        primary_key: newSyncMode === 'incremental_merge' ? (newPrimaryKey.trim() || null) : null,
+        primary_key: newPrimaryKey.trim() || null,
         rules: []
       });
       setShowCreateModal(false);
       setNewFlowName('');
       setNewFlowDesc('');
       setNewFlowCategory('General');
-      setNewSyncMode('incremental_merge');
+      setNewSyncMode('snapshot_detect');
       setNewWatermarkCol('aud_last_update');
       setNewPrimaryKey('id');
       setToastMsg(`Created Flow "${created.name}"! ${jumpToSource ? 'Opening Data Sources...' : ''}`);
@@ -192,6 +195,55 @@ export const FlowsOverviewTrackerView = ({
     } catch (err) {
       setToastMsg(extractErrorMessage(err, `Failed to reset watermark for "${flowName}"`));
       setTimeout(() => setToastMsg(null), 4000);
+    }
+  };
+
+  const handleInitialSnapshot = async (flow) => {
+    setDetectingFlowId(flow.id);
+    try {
+      const synced = await DataFlowAPI.detectFlowChanges(flow.id);
+      setChangeReports((previous) => ({ ...previous, [flow.id]: { ...synced, pending: true } }));
+      setToastMsg(`Initial snapshot captured (${synced.source_rows || 0} rows). Run the pipeline to create the destination and comparison baseline.`);
+      setTimeout(() => setToastMsg(null), 6000);
+      if (onRefreshFlows) await onRefreshFlows();
+    } catch (err) {
+      setToastMsg(extractErrorMessage(err, 'Could not load initial snapshot.'));
+      setTimeout(() => setToastMsg(null), 5000);
+    } finally {
+      setDetectingFlowId(null);
+    }
+  };
+
+  const handleDetectChanges = async (flow) => {
+    setDetectingFlowId(flow.id);
+    setToastMsg(null);
+    try {
+      const report = await DataFlowAPI.detectFlowChanges(flow.id);
+      setChangeReports((previous) => ({ ...previous, [flow.id]: report }));
+      setToastMsg(`Snapshot checked: ${report.added_rows} new, ${report.changed_rows} changed, ${report.deleted_rows} removed.`);
+      setTimeout(() => setToastMsg(null), 5000);
+    } catch (err) {
+      setToastMsg(extractErrorMessage(err, 'Could not detect source changes.'));
+      setTimeout(() => setToastMsg(null), 5000);
+    } finally {
+      setDetectingFlowId(null);
+    }
+  };
+
+  const handleRunDetectedChanges = async (flow) => {
+    setRunningDetectedFlowId(flow.id);
+    try {
+      const result = await DataFlowAPI.runDetectedSnapshot(flow.id);
+      const report = changeReports[flow.id];
+      setToastMsg(`Pipeline ${result.job.status}: processed ${result.source_rows} source rows. Snapshot baseline updated.`);
+      if (report) setChangeReports((previous) => ({ ...previous, [flow.id]: { ...report, pending: false } }));
+      if (onRefreshFlows) await onRefreshFlows();
+      setTimeout(() => setToastMsg(null), 5000);
+    } catch (err) {
+      setToastMsg(extractErrorMessage(err, 'Pipeline failed. The prior snapshot baseline was kept.'));
+      setTimeout(() => setToastMsg(null), 6000);
+    } finally {
+      setRunningDetectedFlowId(null);
     }
   };
 
@@ -389,7 +441,12 @@ export const FlowsOverviewTrackerView = ({
                         </span>
                         
                         {/* Sync Strategy Pill */}
-                        {flow.sync_mode === 'incremental_merge' ? (
+                        {flow.sync_mode === 'snapshot_detect' ? (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 flex items-center space-x-1" title="Compare source snapshots before running transformations">
+                            <Search className="w-2.5 h-2.5 text-indigo-500" />
+                            <span>Detect Changes</span>
+                          </span>
+                        ) : flow.sync_mode === 'incremental_merge' ? (
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 flex items-center space-x-1" title={`Merge on Primary Key: ${flow.primary_key || 'id'}`}>
                             <Zap className="w-2.5 h-2.5 text-purple-500" />
                             <span>Incr. Merge ({flow.primary_key || 'id'})</span>
@@ -513,17 +570,72 @@ export const FlowsOverviewTrackerView = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
-                    {/* Live Incremental Sync Trigger Button */}
-                    <button
-                      type="button"
-                      disabled={syncingFlowId === flow.id}
-                      onClick={() => handleSyncFlow(flow.id, flow.name)}
-                      className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1 shadow-xs transition-colors disabled:opacity-50"
-                      title="Trigger Live Incremental Sync with aud_last_update Watermark"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${syncingFlowId === flow.id ? 'animate-spin' : ''}`} />
-                      <span>{syncingFlowId === flow.id ? 'Syncing...' : 'Sync Now'}</span>
-                    </button>
+                    {flow.sync_mode === 'snapshot_detect' ? (
+                      <button
+                        type="button"
+                        disabled={detectingFlowId === flow.id || runningDetectedFlowId === flow.id}
+                        onClick={() => flow.source_request ? handleDetectChanges(flow) : onNavigateToStep?.(1)}
+                        className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium flex items-center space-x-1 shadow-xs transition-colors disabled:opacity-50"
+                        title="Read source and compare to the last committed snapshot"
+                      >
+                        <Search className={`w-3 h-3 ${detectingFlowId === flow.id ? 'animate-pulse' : ''}`} />
+                        <span>{detectingFlowId === flow.id ? 'Checking...' : flow.source_request ? 'Detect Changes' : 'Connect Source'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={syncingFlowId === flow.id}
+                        onClick={() => handleSyncFlow(flow.id, flow.name)}
+                        className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-white dark:text-zinc-900 text-xs font-medium flex items-center space-x-1 shadow-xs transition-colors disabled:opacity-50"
+                        title="Trigger Live Incremental Sync with aud_last_update Watermark"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${syncingFlowId === flow.id ? 'animate-spin' : ''}`} />
+                        <span>{syncingFlowId === flow.id ? 'Syncing...' : 'Sync Now'}</span>
+                      </button>
+                    )}
+
+                    {flow.sync_mode === 'snapshot_detect' && !flow.source_request && (
+                      <button type="button" onClick={() => { if (onSelectFlow) onSelectFlow(flow.id); if (onNavigateToStep) onNavigateToStep(1); }} className="flex-1 sm:flex-initial justify-center px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center space-x-1 transition-colors">
+                        <Database className="w-3 h-3" /><span>Connect Source</span>
+                      </button>
+                    )}
+
+                    {changeReports[flow.id] && (
+                      <div className="w-full basis-full rounded-md border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/60 dark:bg-indigo-950/20 p-2.5 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-zinc-700 dark:text-zinc-300">
+                            <span><strong>{changeReports[flow.id].added_rows}</strong> new</span>
+                            <span><strong>{changeReports[flow.id].changed_rows}</strong> changed</span>
+                            <span><strong>{changeReports[flow.id].deleted_rows}</strong> removed</span>
+                            <span><strong>{changeReports[flow.id].unchanged_rows}</strong> unchanged</span>
+                          </div>
+                          {(!changeReports[flow.id].baseline_exists || (changeReports[flow.id].added_rows + changeReports[flow.id].changed_rows + changeReports[flow.id].deleted_rows) > 0) && changeReports[flow.id].pending !== false && (
+                            <button type="button" disabled={runningDetectedFlowId === flow.id} onClick={() => handleRunDetectedChanges(flow)} className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-medium disabled:opacity-50">
+                              {runningDetectedFlowId === flow.id ? 'Running...' : 'Run Pipeline & Load'}
+                            </button>
+                          )}
+                          {changeReports[flow.id].baseline_exists && (changeReports[flow.id].added_rows + changeReports[flow.id].changed_rows + changeReports[flow.id].deleted_rows) === 0 && (
+                            <span className="text-emerald-700 dark:text-emerald-400 font-medium">No changes; destination was not written.</span>
+                          )}
+                        </div>
+                        {!changeReports[flow.id].primary_keys?.length && <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-400">No primary key set: comparison can only report whole-row additions/removals.</p>}
+                        {(changeReports[flow.id].changed_sample?.length > 0 || changeReports[flow.id].added_sample?.length > 0 || changeReports[flow.id].deleted_sample?.length > 0) && (
+                          <details className="mt-2 border-t border-indigo-200/70 dark:border-indigo-800/50 pt-2">
+                            <summary className="cursor-pointer font-medium text-indigo-800 dark:text-indigo-300">View sample changes</summary>
+                            <div className="mt-2 space-y-2 max-h-56 overflow-auto">
+                              {changeReports[flow.id].changed_sample?.map((item, index) => (
+                                <div key={`changed-${index}`} className="rounded border border-amber-200 dark:border-amber-900/60 bg-white/70 dark:bg-zinc-900/70 p-2">
+                                  <div className="font-medium text-amber-800 dark:text-amber-300">Changed · key {JSON.stringify(item.key)} · {item.changed_columns.join(', ')}</div>
+                                  <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-zinc-600 dark:text-zinc-400">{JSON.stringify({ before: item.before, after: item.after }, null, 2)}</pre>
+                                </div>
+                              ))}
+                              {changeReports[flow.id].added_sample?.map((row, index) => <pre key={`added-${index}`} className="rounded border border-emerald-200 dark:border-emerald-900/60 bg-white/70 dark:bg-zinc-900/70 p-2 whitespace-pre-wrap break-words text-[10px]">New · {JSON.stringify(row, null, 2)}</pre>)}
+                              {changeReports[flow.id].deleted_sample?.map((row, index) => <pre key={`deleted-${index}`} className="rounded border border-rose-200 dark:border-rose-900/60 bg-white/70 dark:bg-zinc-900/70 p-2 whitespace-pre-wrap break-words text-[10px]">Removed · {JSON.stringify(row, null, 2)}</pre>)}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )}
 
                     {flow.last_watermark_value && (
                       <button
@@ -660,7 +772,15 @@ export const FlowsOverviewTrackerView = ({
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                   Ingestion & Sync Strategy
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className={`grid gap-2 ${newSyncMode === 'snapshot_detect' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-3'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setNewSyncMode('snapshot_detect')}
+                    className={`p-2 rounded-lg border text-left transition-all ${newSyncMode === 'snapshot_detect' ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-200 ring-1 ring-indigo-500' : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'}`}
+                  >
+                    <div className="flex items-center space-x-1.5 mb-1"><Search className="w-3.5 h-3.5 text-indigo-500" /><span className="text-xs font-semibold">Detect Changes</span></div>
+                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-tight">Compare full snapshots, then run rules only when changed</p>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setNewSyncMode('full')}
@@ -717,20 +837,21 @@ export const FlowsOverviewTrackerView = ({
                 </div>
               </div>
 
-              {newSyncMode === 'incremental_merge' && (
-                <div className="p-3 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/50 rounded-lg space-y-1.5">
+              {(newSyncMode === 'incremental_merge' || newSyncMode === 'snapshot_detect') && (
+              <div className={`p-3 ${newSyncMode === 'snapshot_detect' ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/50' : 'bg-purple-50/50 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/50'} border rounded-lg space-y-1.5`}>
                   <div className="flex items-center space-x-1.5 text-purple-700 dark:text-purple-300">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span className="text-xs font-medium">Primary Key / Merge Identifier</span>
+                    <span className="text-xs font-medium">{newSyncMode === 'snapshot_detect' ? 'Primary Key for Change Detection' : 'Primary Key / Merge Identifier'}</span>
                   </div>
                   <input
                     type="text"
-                    required
+                    required={newSyncMode === 'incremental_merge'}
                     value={newPrimaryKey}
                     onChange={(e) => setNewPrimaryKey(e.target.value)}
                     placeholder="e.g. order_id, customer_id, id"
                     className="w-full px-3 py-1.5 bg-white dark:bg-zinc-950 border border-purple-200 dark:border-purple-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
                   />
+                  {newSyncMode === 'snapshot_detect' && <p className="text-[10px] text-zinc-600 dark:text-zinc-400">Recommended. Required to distinguish updates from delete-plus-add changes.</p>}
                 </div>
               )}
 

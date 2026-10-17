@@ -920,6 +920,14 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
   const [dbPassword, setDbPassword] = useState(schedule?.destination_config?.database_dest?.password || '');
   const [dbWriteMode, setDbWriteMode] = useState(schedule?.destination_config?.database_dest?.write_mode || 'append');
 
+  const [dbxHost, setDbxHost] = useState(schedule?.destination_config?.databricks_dest?.server_hostname || '');
+  const [dbxHttpPath, setDbxHttpPath] = useState(schedule?.destination_config?.databricks_dest?.http_path || '');
+  const [dbxToken, setDbxToken] = useState(schedule?.destination_config?.databricks_dest?.access_token || '');
+  const [dbxCatalog, setDbxCatalog] = useState(schedule?.destination_config?.databricks_dest?.catalog || 'main');
+  const [dbxSchema, setDbxSchema] = useState(schedule?.destination_config?.databricks_dest?.schema_name || 'default');
+  const [dbxTable, setDbxTable] = useState(schedule?.destination_config?.databricks_dest?.table_name || 'curated_output');
+  const [dbxWriteMode, setDbxWriteMode] = useState(schedule?.destination_config?.databricks_dest?.write_mode || 'append');
+
   const [s3Bucket, setS3Bucket] = useState(schedule?.destination_config?.s3_dest?.bucket_name || '');
   const [s3Key, setS3Key] = useState(schedule?.destination_config?.s3_dest?.key_path || 'exports/scheduled_data.parquet');
   const [s3Format, setS3Format] = useState(schedule?.destination_config?.s3_dest?.file_format || 'parquet');
@@ -931,6 +939,7 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
   const [showAzureConnString, setShowAzureConnString] = useState(false);
   const [showDbPassword, setShowDbPassword] = useState(false);
   const [showS3SecretKey, setShowS3SecretKey] = useState(false);
+  const [showDbxToken, setShowDbxToken] = useState(false);
 
   // Load Saved Connections
   useEffect(() => {
@@ -989,12 +998,12 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
       }
     } else if (st === 'databricks') {
       setDestType('databricks');
-      if (cfg.dbxHost) setDbxHost(cfg.dbxHost);
-      if (cfg.dbxHttpPath) setDbxHttpPath(cfg.dbxHttpPath);
-      if (cfg.dbxToken) setDbxToken(cfg.dbxToken);
-      if (cfg.dbxCatalog) setDbxCatalog(cfg.dbxCatalog);
-      if (cfg.dbxSchema) setDbxSchema(cfg.dbxSchema);
-      if (cfg.dbxTable) setDbxTable(cfg.dbxTable);
+      setDbxHost(cfg.dbxHost || cfg.server_hostname || '');
+      setDbxHttpPath(cfg.dbxHttpPath || cfg.http_path || '');
+      setDbxToken(cfg.dbxToken || cfg.access_token || '');
+      setDbxCatalog(cfg.dbxCatalog || cfg.catalog || 'main');
+      setDbxSchema(cfg.dbxSchema || cfg.schema_name || 'default');
+      setDbxTable(cfg.dbxTable || cfg.table_name || 'curated_output');
     } else if (st === 's3') {
       setDestType('s3');
       setS3Bucket(cfg.s3Bucket || cfg.bucket_name || cfg.bucket || '');
@@ -1112,12 +1121,16 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
           }
         };
       } else if (destType === 'databricks' || destType === 'databricks_catalog') {
+        if (!dbxHost.trim() || !dbxHttpPath.trim() || !dbxToken.trim()) {
+          setPageError('Databricks host, SQL warehouse HTTP path, and access token are required.');
+          return;
+        }
         destinationConfig = {
           destination_type: 'databricks',
           databricks_dest: {
-            server_hostname: dbxHost || 'adb-123456789.azuredatabricks.net',
-            http_path: dbxHttpPath || '/sql/1.0/warehouses/a1b2c3d4e5f6',
-            access_token: dbxToken || undefined,
+            server_hostname: dbxHost.trim(),
+            http_path: dbxHttpPath.trim(),
+            access_token: dbxToken.trim(),
             catalog: dbxCatalog || 'main',
             schema_name: dbxSchema || 'default',
             table_name: dbxTable || 'curated_output',
@@ -1555,6 +1568,15 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                 </button>
                 <button
                   type="button"
+                  onClick={() => setDestType('databricks')}
+                  className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
+                    destType === 'databricks' ? 'bg-white dark:bg-zinc-900 font-semibold shadow-xs text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'
+                  }`}
+                >
+                  Databricks
+                </button>
+                <button
+                  type="button"
                   onClick={() => setDestType('lakehouse')}
                   className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
                     destType === 'lakehouse' ? 'bg-white dark:bg-zinc-900 font-semibold shadow-xs text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'
@@ -1838,6 +1860,52 @@ export const ScheduleConfigPageView = ({ schedule, flows = [], allDatasets = [],
                     >
                       <option value="append">Append (Extend Rows)</option>
                       <option value="replace">Replace (Overwrite Table)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {destType === 'databricks' && (
+              <div className="space-y-3 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Server Hostname *</label>
+                    <input type="text" value={dbxHost} onChange={(e) => setDbxHost(e.target.value)} placeholder="adb-123456789.azuredatabricks.net" className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">SQL Warehouse HTTP Path *</label>
+                    <input type="text" value={dbxHttpPath} onChange={(e) => setDbxHttpPath(e.target.value)} placeholder="/sql/1.0/warehouses/..." className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Access Token *</label>
+                  <div className="relative">
+                    <input type={showDbxToken ? 'text' : 'password'} value={dbxToken} onChange={(e) => setDbxToken(e.target.value)} placeholder="Databricks personal access token" className="w-full px-3 pr-10 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono" />
+                    <button type="button" onClick={() => setShowDbxToken((show) => !show)} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1" aria-label={showDbxToken ? 'Hide access token' : 'Show access token'}>
+                      {showDbxToken ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Catalog</label>
+                    <input type="text" value={dbxCatalog} onChange={(e) => setDbxCatalog(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Schema</label>
+                    <input type="text" value={dbxSchema} onChange={(e) => setDbxSchema(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Target Table</label>
+                    <input type="text" value={dbxTable} onChange={(e) => setDbxTable(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Write Mode</label>
+                    <select value={dbxWriteMode} onChange={(e) => setDbxWriteMode(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs">
+                      <option value="append">Append</option>
+                      <option value="replace">Replace</option>
+                      <option value="overwrite">Overwrite</option>
                     </select>
                   </div>
                 </div>

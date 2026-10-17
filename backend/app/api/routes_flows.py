@@ -1,10 +1,13 @@
 import uuid
 import time
+import hashlib
+import json
+import math
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from ..models.schemas import DataFlow, CreateFlowRequest, UpdateFlowRequest, FlowSummary, SourceConnectionRequest
+from ..models.schemas import DataFlow, CreateFlowRequest, UpdateFlowRequest, FlowSummary, SourceConnectionRequest, SourceType, DestinationTypeEnum
 from ..models.db_models import CatalogDB
 from ..connectors import get_connector
 from ..engine.schema_engine import profile_dataframe
@@ -138,6 +141,8 @@ def sync_flow(flow_id: str, force_full: bool = False):
             "columns": column_profiles,
             "file_size_bytes": file_size
         }
+
+
         CatalogDB.save_staged_dataset(dataset_info)
 
         if wm_to_save:
@@ -190,6 +195,188 @@ def sync_flow(flow_id: str, force_full: bool = False):
             "synced_at": now.isoformat(),
             "message": f"Staged dataset {ds_dict.get('name')} refreshed."
         }
+
+def _json_safe_value(value):
+    if value is None or pd.isna(value):
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return str(value)
+
+
+def _stable_row_hash(row: Dict[str, Any], excluded_keys: List[str]) -> str:
+    payload = {key: _json_safe_value(value) for key, value in row.items() if key not in excluded_keys and key != "aud_last_update"}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _compare_snapshots(previous_rows, current_rows, primary_keys):
+    if primary_keys:
+        def key_for(row):
+            values = [_json_safe_value(row.get(column)) for column in primary_keys]
+            if any(value is None for value in values):
+                raise ValueError(f"Primary key column(s) {primary_keys} contain null values; change detection requires non-null keys.")
+            return json.dumps(values, sort_keys=True, separators=(",", ":"))
+
+        previous_by_key = {key_for(row): row for row in previous_rows}
+        current_by_key = {key_for(row): row for row in current_rows}
+        if len(previous_by_key) != len(previous_rows) or len(current_by_key) != len(current_rows):
+            raise ValueError("Primary key values must be unique for reliable change detection.")
+
+        added_keys = current_by_key.keys() - previous_by_key.keys()
+        deleted_keys = previous_by_key.keys() - current_by_key.keys()
+        common_keys = current_by_key.keys() & previous_by_key.keys()
+        changed, unchanged = [], 0
+        excluded = set(primary_keys)
+        for key in common_keys:
+            old_row, new_row = previous_by_key[key], current_by_key[key]
+            if _stable_row_hash(old_row, excluded) != _stable_row_hash(new_row, excluded):
+                changed_columns = [column for column in (set(old_row) | set(new_row)) - excluded
+                                   if _json_safe_value(old_row.get(column)) != _json_safe_value(new_row.get(column))]
+                changed.append({"key": json.loads(key), "changed_columns": sorted(changed_columns), "before": old_row, "after": new_row})
+            else:
+                unchanged += 1
+        return {
+            "added_rows": len(added_keys), "changed_rows": len(changed), "deleted_rows": len(deleted_keys),
+            "unchanged_rows": unchanged, "added_sample": [current_by_key[k] for k in list(added_keys)[:20]],
+            "changed_sample": changed[:20], "deleted_sample": [previous_by_key[k] for k in list(deleted_keys)[:20]],
+            "primary_keys": primary_keys, "comparison_mode": "primary_key",
+        }
+
+    previous_counts, current_counts = {}, {}
+    for row in previous_rows:
+        fingerprint = _stable_row_hash(row, [])
+        previous_counts[fingerprint] = previous_counts.get(fingerprint, 0) + 1
+    for row in current_rows:
+        fingerprint = _stable_row_hash(row, [])
+        current_counts[fingerprint] = current_counts.get(fingerprint, 0) + 1
+    added = sum(max(0, count - previous_counts.get(key, 0)) for key, count in current_counts.items())
+    deleted = sum(max(0, count - current_counts.get(key, 0)) for key, count in previous_counts.items())
+    return {
+        "added_rows": added, "changed_rows": 0, "deleted_rows": deleted,
+        "unchanged_rows": sum(min(count, current_counts.get(key, 0)) for key, count in previous_counts.items()),
+        "added_sample": [], "changed_sample": [], "deleted_sample": [], "primary_keys": [],
+        "comparison_mode": "whole_row",
+    }
+
+
+@router.post("/{flow_id}/detect-changes")
+def detect_flow_changes(flow_id: str):
+    """Read the attached source snapshot and compare it to the last committed baseline."""
+    flow = CatalogDB.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id} not found.")
+    source_config = flow.get("source_request")
+    if not source_config:
+        raise HTTPException(status_code=400, detail="No source connection is attached to this flow.")
+    try:
+        source_request = SourceConnectionRequest(**source_config)
+        if source_request.source_type == SourceType.DATABASE and not source_request.database_config:
+            raise HTTPException(status_code=400, detail="Database source details are missing from this flow connection.")
+        previous = CatalogDB.get_flow_snapshot(flow_id)
+        connector = get_connector(source_request)
+        current_df = connector.extract_data()
+        if current_df.empty:
+            raise HTTPException(status_code=422, detail="Source returned no rows; refusing to treat this as a deletion of all baseline data.")
+        if len(current_df) >= 100_000:
+            raise HTTPException(status_code=413, detail="Snapshot change detection is limited to fewer than 100,000 source rows for safe metadata storage.")
+
+        rows = [{key: _json_safe_value(value) for key, value in row.items()} for row in current_df.to_dict(orient="records")]
+        keys = [flow["primary_key"]] if flow.get("primary_key") else []
+        missing_key_columns = [key for key in keys if key not in current_df.columns]
+        if missing_key_columns:
+            raise HTTPException(status_code=422, detail=f"Configured primary key column(s) not found in source: {', '.join(missing_key_columns)}")
+        if previous:
+            CatalogDB.clear_pending_flow_snapshot(flow_id)
+        try:
+            _compare_snapshots([], rows, keys)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not previous:
+            result = {
+                "added_rows": len(rows), "changed_rows": 0, "deleted_rows": 0, "unchanged_rows": 0,
+                "added_sample": rows[:20], "changed_sample": [], "deleted_sample": [], "primary_keys": keys,
+                "comparison_mode": "primary_key" if keys else "whole_row", "baseline_exists": False,
+            }
+        else:
+            try:
+                result = _compare_snapshots(previous["rows"], rows, keys)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            result["baseline_exists"] = True
+
+        CatalogDB.save_pending_flow_snapshot(flow_id, list(current_df.columns), rows)
+        result.update({"flow_id": flow_id, "source_rows": len(rows), "columns": list(current_df.columns), "detected_at": datetime.utcnow().isoformat(), "source_summary": connector.get_source_summary()})
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Change detection failed: {exc}") from exc
+
+
+@router.post("/{flow_id}/run-detected-snapshot")
+def run_detected_snapshot(flow_id: str):
+    """Run saved flow rules against the latest detected source snapshot and commit its baseline only on success."""
+    pending = CatalogDB.get_flow_snapshot(flow_id)
+    if not pending or pending.get("pending_rows") is None:
+        raise HTTPException(status_code=409, detail="No detected source snapshot is ready. Detect changes first.")
+    flow = CatalogDB.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id} not found.")
+    
+    if not flow.get("source_request"):
+        raise HTTPException(status_code=400, detail="No source connection is attached to this flow.")
+    source_request = SourceConnectionRequest(**flow["source_request"])
+    keys = [flow["primary_key"]] if flow.get("primary_key") else []
+    previous = CatalogDB.get_flow_snapshot(flow_id)
+    if previous:
+        try:
+            change_summary = _compare_snapshots(previous.get("rows", []), pending["pending_rows"], keys)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not any(change_summary.get(name, 0) for name in ("added_rows", "changed_rows", "deleted_rows")):
+            raise HTTPException(status_code=409, detail="No source changes detected. The destination was not modified.")
+    else:
+        try:
+            _compare_snapshots([], pending["pending_rows"], keys)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    df = pd.DataFrame(pending["pending_rows"], columns=pending["pending_columns"] or None)
+    dataset_id = f"stg_detect_{uuid.uuid4().hex[:10]}"
+    now = datetime.utcnow()
+    storage_path, storage_format, file_size, row_count, watermark = DataStoreEngine.save_staged_dataframe(
+        dataset_id=dataset_id, df=df, flow_id=flow_id, sync_mode="full"
+    )
+    dataset_info = {
+        "id": dataset_id, "flow_id": flow_id, "name": f"{flow['name']} Detected Snapshot",
+        "description": "Latest source snapshot loaded by change detection.",
+        "source_type": source_request.source_type.value if hasattr(source_request.source_type, "value") else str(source_request.source_type),
+        "source_summary": source_request.name, "sync_mode": "full", "watermark_column": "aud_last_update",
+        "last_watermark_value": watermark, "last_synced_at": now, "primary_key": flow.get("primary_key"),
+        "row_count": row_count, "column_count": len(df.columns), "storage_path": storage_path,
+        "storage_format": storage_format, "created_at": now, "columns": profile_dataframe(df), "file_size_bytes": file_size,
+    }
+    CatalogDB.save_staged_dataset(dataset_info)
+
+    from ..models.schemas import PipelineExecutionRequest, TransformationRule, ExportDestinationRequest
+    from ..services.job_service import JobService
+    destination = ExportDestinationRequest(**flow["destination_config"]) if flow.get("destination_config") else None
+    rules = [TransformationRule(**rule) for rule in CatalogDB.get_flow_rules(flow_id)]
+    job = JobService.execute_pipeline(PipelineExecutionRequest(
+        name=f"Detected Changes: {flow['name']}", staging_dataset_id=dataset_id, rules=rules,
+        output_dataset_name=f"curated_{flow_id}", output_description="Output generated from detected source snapshot.",
+        flow_id=flow_id, stage_output=True, destination_config=destination, promote_snapshot_flow_id=flow_id,
+        source_snapshot=pending["pending_rows"], source_snapshot_columns=pending["pending_columns"],
+    ))
+    if job.status.value != "completed":
+        raise HTTPException(status_code=500, detail=f"Pipeline failed; saved snapshot remains unchanged. Job {job.id}: {job.message}")
+    CatalogDB.record_audit_log(event_type="FLOW_SNAPSHOT_PIPELINE_COMPLETED", entity_id=flow_id, entity_type="DATA_FLOW", summary=f"Detected snapshot transformed and loaded ({row_count} rows)")
+    return {"success": True, "flow_id": flow_id, "job": job.dict(), "staging_dataset_id": dataset_id, "source_rows": row_count}
+
 
 @router.post("/{flow_id}/reset-watermark")
 def reset_flow_watermark(flow_id: str, watermark_value: Optional[str] = None):

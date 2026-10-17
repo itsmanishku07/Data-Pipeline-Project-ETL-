@@ -43,6 +43,7 @@ class SyncMode(str, Enum):
     FULL = "full"
     INCREMENTAL_APPEND = "incremental_append"
     INCREMENTAL_MERGE = "incremental_merge"
+    SNAPSHOT_DETECT = "snapshot_detect"
 
 class DataFlow(BaseModel):
     id: str
@@ -56,6 +57,7 @@ class DataFlow(BaseModel):
     last_synced_at: Optional[datetime] = None
     primary_key: Optional[str] = None
     source_request: Optional[Dict[str, Any]] = None
+    destination_config: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
 
@@ -79,6 +81,7 @@ class CreateFlowRequest(BaseModel):
     watermark_column: Optional[str] = "aud_last_update"
     primary_key: Optional[str] = None
     source_request: Optional[Dict[str, Any]] = None
+    destination_config: Optional[Dict[str, Any]] = None
 
 class UpdateFlowRequest(BaseModel):
     name: Optional[str] = None
@@ -89,6 +92,7 @@ class UpdateFlowRequest(BaseModel):
     watermark_column: Optional[str] = None
     primary_key: Optional[str] = None
     source_request: Optional[Dict[str, Any]] = None
+    destination_config: Optional[Dict[str, Any]] = None
 
 class FlowSummary(BaseModel):
     id: str
@@ -101,6 +105,8 @@ class FlowSummary(BaseModel):
     last_watermark_value: Optional[str] = None
     last_synced_at: Optional[datetime] = None
     primary_key: Optional[str] = None
+    source_request: Optional[Dict[str, Any]] = None
+    destination_config: Optional[Dict[str, Any]] = None
     dataset_count: int = 0
     total_rows: int = 0
     created_at: datetime
@@ -372,6 +378,9 @@ class PipelineExecutionRequest(BaseModel):
     stage_output: bool = True
     export_format: Optional[FileFormat] = None
     destination_config: Optional[ExportDestinationRequest] = None
+    promote_snapshot_flow_id: Optional[str] = None
+    source_snapshot: Optional[List[Dict[str, Any]]] = None
+    source_snapshot_columns: Optional[List[str]] = None
 
 # Job Execution Status
 class JobStatusEnum(str, Enum):

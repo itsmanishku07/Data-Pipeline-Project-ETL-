@@ -10,6 +10,7 @@ import { PipelineExecutionView } from './components/pipeline/PipelineExecutionVi
 import { HistoryAuditView } from './components/history/HistoryAuditView';
 import { ScheduledFlowsView } from './components/schedules/ScheduledFlowsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { HowItWorksView } from './components/docs/HowItWorksView';
 import { TimezoneProvider } from './context/TimezoneContext';
 import { DataFlowAPI } from './services/api';
 import { 
@@ -21,7 +22,8 @@ import {
   PlayCircle, 
   History,
   CalendarClock,
-  Settings
+  Settings,
+  BookOpen
 } from 'lucide-react';
 
 const mobileNavItems = [
@@ -31,7 +33,6 @@ const mobileNavItems = [
   { id: 3, label: 'Staging', icon: Layers },
   { id: 4, label: 'Transform', icon: Sliders },
   { id: 5, label: 'Pipeline', icon: PlayCircle },
-  { id: 6, label: 'History', icon: History },
   { id: 7, label: 'Cron', icon: CalendarClock },
   { id: 8, label: 'Settings', icon: Settings },
 ];
@@ -41,7 +42,7 @@ export const App = () => {
     try {
       const saved = localStorage.getItem('dataflow_current_step');
       const num = Number(saved);
-      return num >= 0 && num <= 8 ? num : 0;
+      return num >= 0 && num <= 9 ? num : 0;
     } catch {
       return 0;
     }
@@ -442,6 +443,8 @@ export const App = () => {
                 onToggleTheme={toggleTheme}
               />
             )}
+
+            {currentStep === 9 && <HowItWorksView />}
           </main>
         </div>
 
@@ -450,7 +453,7 @@ export const App = () => {
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentStep === item.id;
-            const isAccessible = item.id === 0 || item.id === 6 || item.id === 7 || item.id === 8 || item.id <= Math.max(currentStep, maxStepReached);
+            const isAccessible = item.id === 0 || item.id === 7 || item.id === 8 || item.id <= Math.max(currentStep, maxStepReached);
 
             return (
               <button
@@ -474,6 +477,27 @@ export const App = () => {
             );
           })}
         </nav>
+
+        <div className="fixed bottom-16 right-3 z-30 md:hidden flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentStep(6)}
+            className="rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-lg p-3 text-zinc-600 dark:text-zinc-300"
+            title="History & Logs"
+            aria-label="History and Logs"
+          >
+            <History className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentStep(9)}
+            className="rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-lg p-3 text-zinc-600 dark:text-zinc-300"
+            title="Documentation"
+            aria-label="Application documentation"
+          >
+            <BookOpen className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </TimezoneProvider>
   );

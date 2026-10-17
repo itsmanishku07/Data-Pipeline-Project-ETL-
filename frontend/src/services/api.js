@@ -87,6 +87,21 @@ export const DataFlowAPI = {
     return res.data;
   },
 
+  detectFlowChanges: async (flowId) => {
+    const res = await api.post(`/flows/${flowId}/detect-changes`);
+    return res.data;
+  },
+
+  runDetectedSnapshot: async (flowId) => {
+    const res = await api.post(`/flows/${flowId}/run-detected-snapshot`);
+    invalidateDataFlowCache('flows');
+    invalidateDataFlowCache(`flow_${flowId}`);
+    invalidateDataFlowCache('staged_');
+    invalidateDataFlowCache('jobs');
+    invalidateDataFlowCache('history');
+    return res.data;
+  },
+
   resetFlowWatermark: async (flowId, watermarkValue = null) => {
     const url = watermarkValue ? `/flows/${flowId}/reset-watermark?watermark_value=${encodeURIComponent(watermarkValue)}` : `/flows/${flowId}/reset-watermark`;
     const res = await api.post(url);

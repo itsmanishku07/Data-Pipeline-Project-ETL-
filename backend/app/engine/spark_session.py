@@ -61,4 +61,17 @@ class SparkSessionManager:
         except Exception:
             return False
 
+    @classmethod
+    def stop_session(cls):
+        """Gracefully stops and disposes the Spark session to prevent memory leaks."""
+        if cls._instance is not None:
+            try:
+                cls._instance.stop()
+                logger.info("Spark session stopped successfully.")
+            except Exception as e:
+                logger.warning(f"Error stopping Spark session: {e}")
+            finally:
+                cls._instance = None
+                cls._is_native_spark = False
+
 spark_manager = SparkSessionManager()

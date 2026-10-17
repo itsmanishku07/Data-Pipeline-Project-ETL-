@@ -125,20 +125,25 @@ class DatabaseConnector(BaseConnector):
             else:
                 raise ValueError("No table_name or query specified for database extraction.")
 
-            # Incremental High Watermark Filter
+            # Incremental High Watermark Filter using parameterized queries
+            params = {}
             if watermark_col and last_watermark:
-                clean_wm = str(last_watermark).replace("'", "''")
+                # Use parameterized queries to prevent SQL injection
+                watermark_placeholder = ":watermark_value"
                 if "WHERE" in sql.upper():
-                    sql = f"{sql} AND {watermark_col} > '{clean_wm}'"
+                    sql = f"{sql} AND {watermark_col} > {watermark_placeholder}"
                 else:
-                    sql = f"{sql} WHERE {watermark_col} > '{clean_wm}'"
+                    sql = f"{sql} WHERE {watermark_col} > {watermark_placeholder}"
+                params["watermark_value"] = last_watermark
 
             if limit and "LIMIT" not in sql.upper() and "TOP" not in sql.upper():
                 sql = f"{sql} LIMIT {limit}"
 
-            df = pd.read_sql(sql, con=engine)
+            df = pd.read_sql(text(sql), con=engine, params=params if params else None)
             # Automatically stamp standard aud_last_update audit column
-            df = self.append_audit_timestamp(df)
+            # Keep source audit columns unchanged for snapshot comparisons.
+            # Only synthesize the column when the source does not provide one.
+            df = self.append_audit_timestamp(df, force_new=False)
             return df
         except Exception as e:
             raise RuntimeError(f"Database Query Error on {self.config.db_type.value}: {str(e)}")

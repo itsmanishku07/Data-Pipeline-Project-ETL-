@@ -237,7 +237,7 @@ export const StagingAreaView = ({
                 {ds.name}
               </span>
               <span className="text-[10px] font-mono text-zinc-400 block truncate">
-                {isCurated ? '⚡ Curated PySpark Output' : '📥 Raw Ingested Lakehouse Table'}
+                {isCurated ? '⚡ Curated PySpark Output' : 'Raw Ingested Lakehouse Table'}
               </span>
             </div>
           </div>

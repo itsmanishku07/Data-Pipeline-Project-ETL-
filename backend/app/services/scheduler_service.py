@@ -1,5 +1,6 @@
 import logging
 import threading
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from croniter import croniter
@@ -73,6 +74,21 @@ def calculate_next_runs(cron_expr: str, base_time: Optional[datetime] = None, co
     except Exception as e:
         logger.warning(f"Error calculating next runs for cron '{cron_expr}': {e}")
         return []
+
+def normalize_dow_for_apscheduler(dow: str) -> str:
+    """
+    Translates standard crontab numeric day-of-week (0=Sun, 1=Mon, ..., 6=Sat, 7=Sun)
+    to named days (sun, mon, tue, wed, thu, fri, sat) to prevent APScheduler 3.x's
+    historical Monday=0 offset bug.
+    """
+    dow_map = {
+        "0": "sun", "1": "mon", "2": "tue", "3": "wed",
+        "4": "thu", "5": "fri", "6": "sat", "7": "sun"
+    }
+    res = dow
+    for num, name in dow_map.items():
+        res = re.sub(r'\b' + num + r'\b', name, res)
+    return res
 
 class SchedulerService:
     _scheduler: Optional[BackgroundScheduler] = None
@@ -151,12 +167,14 @@ class SchedulerService:
                 logger.warning(f"Invalid cron expression '{cron_expr}' for schedule {job_id}")
                 return
 
+            dow_normalized = normalize_dow_for_apscheduler(parts[4])
+
             trigger = CronTrigger(
                 minute=parts[0],
                 hour=parts[1],
                 day=parts[2],
                 month=parts[3],
-                day_of_week=parts[4],
+                day_of_week=dow_normalized,
                 timezone=timezone.utc
             )
 
@@ -190,9 +208,10 @@ class SchedulerService:
         """
         Executes a scheduled flow:
         1. Loads schedule and flow configurations.
-        2. Executes transformation rules on staged dataset.
-        3. Loads output directly to configured destination (Azure/DB/S3/Lakehouse).
-        4. Updates execution metrics and calculates next run time.
+        2. Optionally refreshes source data if flow has an attached source.
+        3. Executes transformation rules on staged dataset.
+        4. Loads output directly to configured destination (Azure/DB/S3/Lakehouse).
+        5. Updates execution metrics and calculates next run time.
         """
         sched_data = CatalogDB.get_schedule(schedule_id)
         if not sched_data:
@@ -204,34 +223,50 @@ class SchedulerService:
         staging_dataset_id = sched_data["staging_dataset_id"]
         cron_expr = sched_data.get("cron_expression", "")
 
-        rules_data = CatalogDB.get_flow_rules(flow_id)
-        rules = [TransformationRule(**r) for r in rules_data] if rules_data else []
-
-        dest_cfg = sched_data.get("destination_config")
-        destination_request = None
-        if dest_cfg:
-            try:
-                destination_request = ExportDestinationRequest(**dest_cfg) if isinstance(dest_cfg, dict) else dest_cfg
-            except Exception as e:
-                logger.warning(f"Failed to parse destination request for schedule {schedule_id}: {e}")
-
-        pipeline_req = PipelineExecutionRequest(
-            name=f"[CRON] {sched_name}",
-            staging_dataset_id=staging_dataset_id,
-            rules=rules,
-            output_dataset_name=f"curated_{flow_id}",
-            output_description=f"Automated scheduled run by trigger '{sched_name}'",
-            flow_id=flow_id,
-            stage_output=True,
-            destination_config=destination_request
-        )
-
-        logger.info(f"Executing scheduled job '{sched_name}' for flow '{flow_id}' (Rules: {len(rules)})...")
-
         next_runs = calculate_next_runs(cron_expr, count=1)
         next_run_dt = datetime.fromisoformat(next_runs[0]) if next_runs else None
 
         try:
+            # 1. Optionally refresh latest source data if source connection exists
+            try:
+                flow_obj = CatalogDB.get_flow(flow_id)
+                if flow_obj and flow_obj.get("source_request"):
+                    from ..api.routes_flows import sync_flow
+                    sync_flow(flow_id=flow_id)
+                    logger.info(f"Refreshed source data for flow '{flow_id}' prior to scheduled transformation.")
+            except Exception as sync_e:
+                logger.warning(f"Pre-sync for scheduled flow '{flow_id}' notice: {sync_e}. Proceeding with current stage data.")
+
+            # 2. Parse rules safely whether returned as dict or list
+            rules_data = CatalogDB.get_flow_rules(flow_id)
+            if isinstance(rules_data, dict):
+                raw_rules = rules_data.get("rules", [])
+            elif isinstance(rules_data, list):
+                raw_rules = rules_data
+            else:
+                raw_rules = []
+            rules = [TransformationRule(**r) for r in raw_rules if isinstance(r, dict)]
+
+            dest_cfg = sched_data.get("destination_config")
+            destination_request = None
+            if dest_cfg:
+                try:
+                    destination_request = ExportDestinationRequest(**dest_cfg) if isinstance(dest_cfg, dict) else dest_cfg
+                except Exception as e:
+                    logger.warning(f"Failed to parse destination request for schedule {schedule_id}: {e}")
+
+            pipeline_req = PipelineExecutionRequest(
+                name=f"[CRON] {sched_name}",
+                staging_dataset_id=staging_dataset_id,
+                rules=rules,
+                output_dataset_name=f"curated_{flow_id}",
+                output_description=f"Automated scheduled run by trigger '{sched_name}'",
+                flow_id=flow_id,
+                stage_output=True,
+                destination_config=destination_request
+            )
+
+            logger.info(f"Executing scheduled job '{sched_name}' for flow '{flow_id}' (Rules: {len(rules)})...")
             job_status = JobService.execute_pipeline(pipeline_req)
             
             CatalogDB.record_schedule_run(
@@ -259,7 +294,7 @@ class SchedulerService:
             }
         except Exception as e:
             err_msg = f"Scheduled execution failed: {str(e)}"
-            logger.error(err_msg)
+            logger.error(err_msg, exc_info=True)
             
             CatalogDB.record_schedule_run(
                 schedule_id=schedule_id,

@@ -112,7 +112,12 @@ def create_schedule(req: CreateScheduleRequest):
     if not flow:
         raise HTTPException(status_code=404, detail=f"Flow '{req.flow_id}' not found.")
 
-    # 2. Validate Cron Expression
+    # 2. Validate Staging Dataset existence
+    staged_ds = CatalogDB.get_staged_dataset(req.staging_dataset_id)
+    if not staged_ds:
+        raise HTTPException(status_code=404, detail=f"Staging dataset '{req.staging_dataset_id}' not found.")
+
+    # 3. Validate Cron Expression
     upcoming = calculate_next_runs(req.cron_expression, count=1)
     if not upcoming:
         raise HTTPException(status_code=400, detail=f"Invalid cron expression: '{req.cron_expression}'. Standard format is 5 fields (e.g. '0 2 * * *' or '*/15 * * * *').")
@@ -175,6 +180,9 @@ def update_schedule(schedule_id: str, req: UpdateScheduleRequest):
         updates["cron_human"] = req.cron_human or describe_cron(req.cron_expression)
         updates["next_run_at"] = upcoming[0]
     if req.staging_dataset_id is not None:
+        staged_ds = CatalogDB.get_staged_dataset(req.staging_dataset_id)
+        if not staged_ds:
+            raise HTTPException(status_code=404, detail=f"Staging dataset '{req.staging_dataset_id}' not found.")
         updates["staging_dataset_id"] = req.staging_dataset_id
     if req.destination_config is not None:
         updates["destination_config"] = req.destination_config

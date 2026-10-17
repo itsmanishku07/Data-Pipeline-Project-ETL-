@@ -1,17 +1,18 @@
 import React from 'react';
-import { ChevronRight, GitBranch, Menu, PanelLeftOpen, Clock, Globe } from 'lucide-react';
+import { ChevronRight, GitBranch, Menu, PanelLeftOpen, Clock, Layers } from 'lucide-react';
 import { useTimezone } from '../../context/TimezoneContext';
 
 const sectionTitles = {
-  0: { title: 'Data Flows Lifecycle Tracker', subtitle: 'Live stage progression monitoring across Ingestion, Schema, Staging, Transform & Execution' },
-  1: { title: 'Data Source Ingestion', subtitle: 'Connect to PostgreSQL, MySQL, SQL Server, S3, Azure Lakehouse, or Databricks Unity Catalog' },
-  2: { title: 'Schema Definition & Type Casting', subtitle: 'Inspect inferred DataFrame columns and customize Apache Spark data types' },
-  3: { title: 'Lakehouse Staging Repository', subtitle: 'Browse flows and preview staged datasets stored in unified staging layer' },
-  4: { title: 'Transformation Rule Studio', subtitle: 'Chain PySpark filters, math formulas, string operations, and Spark SQL' },
-  5: { title: 'Pipeline DAG Execution', subtitle: 'Compile and run the end-to-end transformation job and export golden files' },
-  6: { title: 'Metadata & Audit Logs', subtitle: 'Explore persistent execution history, ingestion metrics, and audit trail' },
-  7: { title: 'Flow Cron Schedules & Automated Triggers', subtitle: 'Automate recurring flow executions and direct data exports to Cloud Storage or Lakehouse' },
-  8: { title: 'Studio Settings', subtitle: 'Configure metadata storage engine (MySQL / PostgreSQL), application timezone, and display preferences' },
+  0: { title: 'Data Flows', subtitle: 'Manage and monitor your data pipelines' },
+  1: { title: 'Connect Source', subtitle: 'Connect to databases, cloud storage, or APIs' },
+  2: { title: 'Schema Profiling', subtitle: 'Review and configure data types' },
+  3: { title: 'Staging Area', subtitle: 'Preview and manage staged datasets' },
+  4: { title: 'Transformations', subtitle: 'Build data transformation rules' },
+  5: { title: 'Execute Pipeline', subtitle: 'Run and export transformed data' },
+  6: { title: 'History', subtitle: 'View execution logs and audit trail' },
+  7: { title: 'Schedules', subtitle: 'Automate pipeline execution with cron jobs' },
+  8: { title: 'Settings', subtitle: 'Configure database and preferences' },
+  9: { title: 'Documentation', subtitle: 'Client guide to every application tab and workflow' },
 };
 
 export const TopHeader = ({ 
@@ -28,59 +29,57 @@ export const TopHeader = ({
   const { currentTime, formatTime, timezoneShort, effectiveTimezone } = useTimezone();
 
   return (
-    <header className="h-14 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-6 md:px-8 flex items-center justify-between gap-3 sticky top-0 z-30 transition-colors shrink-0">
-      <div className="flex items-center space-x-3 min-w-0 flex-1">
-        {/* Mobile Hamburger Button */}
+    <header className="h-16 glass border-b border-gray-200/50 dark:border-gray-700/50 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30 shrink-0">
+      <div className="flex items-center space-x-4 min-w-0 flex-1">
+        {/* Mobile Menu Button */}
         <button
           type="button"
           onClick={onOpenMobileMenu}
-          className="p-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 md:hidden transition-colors shrink-0"
+          className="md:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
           title="Open Menu"
           aria-label="Open Navigation Menu"
         >
-          <Menu className="w-4 h-4" />
+          <Menu className="w-5 h-5" />
         </button>
 
-        {/* Desktop Sidebar Toggle - Only visible when sidebar is collapsed */}
+        {/* Desktop Sidebar Toggle */}
         {isSidebarHidden && (
           <button
             type="button"
             onClick={onToggleSidebar}
-            className="hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 transition-colors shrink-0 text-xs font-medium"
+            className="hidden md:flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors text-sm font-medium"
             title="Show Sidebar (Ctrl+B)"
             aria-label="Show Sidebar"
           >
-            <PanelLeftOpen className="w-3.5 h-3.5" />
-            <span>Sidebar</span>
+            <PanelLeftOpen className="w-4 h-4" />
+            <span>Show Sidebar</span>
           </button>
         )}
 
+        {/* Page Title */}
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate tracking-tight">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
             {info.title}
-          </h2>
-          <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+          </h1>
+          <p className="hidden sm:block text-sm text-gray-500 dark:text-gray-400 truncate">
             {info.subtitle}
           </p>
         </div>
       </div>
 
-      <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-        {/* Flow Selector Dropdown */}
+      <div className="flex items-center space-x-3 shrink-0">
+        {/* Flow Selector */}
         {flows.length > 0 && currentStep !== 8 && (
-          <div className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs">
-            <GitBranch className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
-            <span className="hidden md:inline text-zinc-400 dark:text-zinc-500 font-medium">Flow:</span>
+          <div className="hidden sm:flex items-center space-x-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-2 rounded-lg text-sm shadow-sm">
+            <GitBranch className="w-4 h-4 text-gray-400 shrink-0" />
             <select
               value={activeFlowId || 'all'}
               onChange={(e) => onSelectFlow && onSelectFlow(e.target.value)}
-              className="bg-transparent text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer max-w-[110px] sm:max-w-[160px] truncate"
+              className="bg-transparent text-sm font-medium text-gray-900 dark:text-white focus:outline-none cursor-pointer max-w-[150px] truncate"
             >
-              <option value="all" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
-                All Flows ({flows.length})
-              </option>
+              <option value="all">All Flows ({flows.length})</option>
               {flows.map((f) => (
-                <option key={f.id} value={f.id} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+                <option key={f.id} value={f.id}>
                   {f.name}
                 </option>
               ))}
@@ -90,23 +89,24 @@ export const TopHeader = ({
 
         {/* Active Dataset Badge */}
         {activeDatasetName && currentStep >= 3 && currentStep <= 5 && (
-          <div className="hidden lg:flex items-center space-x-1.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2.5 py-1 rounded-md text-xs font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-            <span className="text-zinc-500 dark:text-zinc-400">Dataset:</span>
-            <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate max-w-[120px]">{activeDatasetName}</span>
+          <div className="hidden lg:flex items-center space-x-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-3 py-2 rounded-lg">
+            <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span className="text-sm font-medium text-blue-900 dark:text-blue-100 truncate max-w-[120px]">
+              {activeDatasetName}
+            </span>
           </div>
         )}
 
-        {/* LIVE TIMEZONE CLOCK PILL (Informational Badge) */}
+        {/* Live Clock */}
         <div
-          className="flex items-center space-x-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 rounded-md text-xs select-none"
-          title={`Active Timezone: ${effectiveTimezone}`}
+          className="hidden md:flex items-center space-x-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-2 rounded-lg"
+          title={`Timezone: ${effectiveTimezone}`}
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span className="font-mono text-xs font-medium text-zinc-800 dark:text-zinc-200">
+          <Clock className="w-4 h-4 text-gray-400" />
+          <span className="font-mono text-sm font-medium text-gray-900 dark:text-white">
             {formatTime(currentTime)}
           </span>
-          <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold">
+          <span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
             {timezoneShort}
           </span>
         </div>

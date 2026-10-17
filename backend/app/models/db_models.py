@@ -1,9 +1,12 @@
 import json
 import uuid
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, text
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 _GLOBAL_ENGINE = None
 _GLOBAL_ENGINE_TYPE = None
@@ -14,8 +17,9 @@ def reset_db_connection():
     if _GLOBAL_ENGINE is not None:
         try:
             _GLOBAL_ENGINE.dispose()
-        except Exception:
-            pass
+            logger.info("Database connection pool disposed successfully.")
+        except Exception as e:
+            logger.warning(f"Error disposing database connection: {e}")
     _GLOBAL_ENGINE = None
     _GLOBAL_ENGINE_TYPE = None
 
@@ -60,9 +64,9 @@ def get_db_connection():
             engine = create_engine(
                 settings.get_postgres_metadata_url(),
                 connect_args=connect_args,
-                pool_size=5,
-                max_overflow=10,
-                pool_recycle=300,
+                pool_size=settings.DB_POOL_SIZE,
+                max_overflow=settings.DB_MAX_OVERFLOW,
+                pool_recycle=settings.DB_POOL_RECYCLE,
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
@@ -70,9 +74,10 @@ def get_db_connection():
             
             _GLOBAL_ENGINE = engine
             _GLOBAL_ENGINE_TYPE = "postgres"
+            logger.info("Connected to PostgreSQL metadata database successfully.")
             return "postgres", _GLOBAL_ENGINE
         except Exception as e:
-            print(f"[ERROR] Failed to connect to PostgreSQL metadata database: {e}")
+            logger.error(f"Failed to connect to PostgreSQL metadata database: {e}", exc_info=True)
             return "postgres", None
 
     # Default: MySQL
@@ -105,9 +110,9 @@ def get_db_connection():
         engine = create_engine(
             settings.get_mysql_metadata_url(),
             connect_args=connect_args,
-            pool_size=5,
-            max_overflow=10,
-            pool_recycle=300,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_recycle=settings.DB_POOL_RECYCLE,
             pool_pre_ping=True
         )
         with engine.connect() as conn:
@@ -115,16 +120,17 @@ def get_db_connection():
         
         _GLOBAL_ENGINE = engine
         _GLOBAL_ENGINE_TYPE = "mysql"
+        logger.info("Connected to MySQL metadata database successfully.")
         return "mysql", _GLOBAL_ENGINE
     except Exception as e:
-        print(f"[ERROR] Failed to connect to MySQL metadata database: {e}")
+        logger.error(f"Failed to connect to MySQL metadata database: {e}", exc_info=True)
         return "mysql", None
 
 def init_db():
     """Initializes metadata tables in the active metadata database (MySQL or PostgreSQL)."""
     db_type, engine = get_db_connection()
     if engine is None:
-        print(f"[WARN] Cannot initialize tables: {db_type} database is offline or unreachable.")
+        logger.warning(f"Cannot initialize tables: {db_type} database is offline or unreachable.")
         return
 
     try:
@@ -149,12 +155,14 @@ def init_db():
                     last_watermark_value VARCHAR(255) NULL,
                     last_synced_at TIMESTAMP NULL,
                     primary_key VARCHAR(255) NULL,
+                    destination_config_json TEXT NULL,
                     source_request_json TEXT NULL,
                     rules_json TEXT NULL,
                     created_at TIMESTAMP NOT NULL,
                     updated_at TIMESTAMP NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_df_flows_created ON dataflow_flows (created_at);
+                ALTER TABLE dataflow_flows ADD COLUMN IF NOT EXISTS destination_config_json TEXT NULL;
 
                 CREATE TABLE IF NOT EXISTS dataflow_staged_datasets (
                     id VARCHAR(64) PRIMARY KEY,
@@ -190,6 +198,19 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_df_stg_rec_ds ON dataflow_staged_records (dataset_id);
                 CREATE INDEX IF NOT EXISTS idx_df_stg_rec_flow ON dataflow_staged_records (flow_id);
+
+                CREATE TABLE IF NOT EXISTS dataflow_flow_snapshots (
+                    flow_id VARCHAR(64) PRIMARY KEY,
+                    columns_json TEXT NOT NULL,
+                    rows_json TEXT NOT NULL,
+                    pending_columns_json TEXT NULL,
+                    pending_rows_json TEXT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                );
+                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_columns_json TEXT NULL;
+                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_rows_json TEXT NULL;
+                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_columns_json TEXT NULL;
+                ALTER TABLE dataflow_flow_snapshots ADD COLUMN IF NOT EXISTS pending_rows_json TEXT NULL;
 
                 CREATE TABLE IF NOT EXISTS dataflow_pipeline_jobs (
                     id VARCHAR(64) PRIMARY KEY,
@@ -298,6 +319,7 @@ def init_db():
                     last_watermark_value VARCHAR(255) NULL,
                     last_synced_at DATETIME NULL,
                     primary_key VARCHAR(255) NULL,
+                    destination_config_json TEXT NULL,
                     source_request_json JSON NULL,
                     rules_json JSON NULL,
                     created_at DATETIME NOT NULL,
@@ -313,6 +335,7 @@ def init_db():
                     "ALTER TABLE dataflow_flows ADD COLUMN last_watermark_value VARCHAR(255) NULL",
                     "ALTER TABLE dataflow_flows ADD COLUMN last_synced_at DATETIME NULL",
                     "ALTER TABLE dataflow_flows ADD COLUMN primary_key VARCHAR(255) NULL",
+                    "ALTER TABLE dataflow_flows ADD COLUMN destination_config_json JSON NULL",
                     "ALTER TABLE dataflow_flows ADD COLUMN source_request_json JSON NULL"
                 ]:
                     try:
@@ -370,6 +393,25 @@ def init_db():
                     UNIQUE KEY uk_dataset_row (dataset_id, row_index)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """))
+
+                conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dataflow_flow_snapshots (
+                    flow_id VARCHAR(64) PRIMARY KEY,
+                    columns_json JSON NOT NULL,
+                    rows_json LONGTEXT NOT NULL,
+                    pending_columns_json JSON NULL,
+                    pending_rows_json LONGTEXT NULL,
+                    updated_at DATETIME NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """))
+                for col_sql in [
+                    "ALTER TABLE dataflow_flow_snapshots ADD COLUMN pending_columns_json JSON NULL",
+                    "ALTER TABLE dataflow_flow_snapshots ADD COLUMN pending_rows_json LONGTEXT NULL",
+                ]:
+                    try:
+                        conn.execute(text(col_sql))
+                    except Exception:
+                        pass
 
                 conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS dataflow_pipeline_jobs (
@@ -683,6 +725,7 @@ class CatalogDB:
         flow_id = flow_dict.get("id") or f"flow_{uuid.uuid4().hex[:8]}"
         rules_json_str = json.dumps(flow_dict.get("rules", []))
         src_req_str = json.dumps(flow_dict.get("source_request")) if flow_dict.get("source_request") else None
+        dest_cfg_str = json.dumps(flow_dict.get("destination_config")) if flow_dict.get("destination_config") else None
 
         db_type, engine = get_db_connection()
         if engine is None:
@@ -691,9 +734,9 @@ class CatalogDB:
         with engine.connect() as conn:
             conn.execute(text("""
             INSERT INTO dataflow_flows 
-            (id, name, description, category, status, sync_mode, watermark_column, last_watermark_value, last_synced_at, primary_key, source_request_json, rules_json, created_at, updated_at)
+            (id, name, description, category, status, sync_mode, watermark_column, last_watermark_value, last_synced_at, primary_key, destination_config_json, source_request_json, rules_json, created_at, updated_at)
             VALUES 
-            (:id, :name, :description, :category, :status, :sync_mode, :watermark_column, :last_watermark_value, :last_synced_at, :primary_key, :source_request_json, :rules_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (:id, :name, :description, :category, :status, :sync_mode, :watermark_column, :last_watermark_value, :last_synced_at, :primary_key, :destination_config_json, :source_request_json, :rules_json, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """), {
                 "id": flow_id,
                 "name": flow_dict["name"],
@@ -705,6 +748,7 @@ class CatalogDB:
                 "last_watermark_value": flow_dict.get("last_watermark_value"),
                 "last_synced_at": flow_dict.get("last_synced_at"),
                 "primary_key": flow_dict.get("primary_key"),
+                "destination_config_json": dest_cfg_str,
                 "source_request_json": src_req_str,
                 "rules_json": rules_json_str
             })
@@ -731,6 +775,9 @@ class CatalogDB:
             if k in ["name", "description", "category", "status", "sync_mode", "watermark_column", "last_watermark_value", "last_synced_at", "primary_key"]:
                 set_clauses.append(f"{k} = :{k}")
                 params[k] = v
+            elif k == "destination_config":
+                set_clauses.append("destination_config_json = :destination_config_json")
+                params["destination_config_json"] = json.dumps(v.dict() if hasattr(v, "dict") else v) if v else None
             elif k == "rules":
                 set_clauses.append("rules_json = :rules_json")
                 params["rules_json"] = json.dumps(v)
@@ -766,6 +813,23 @@ class CatalogDB:
             SET last_watermark_value = :val, updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
             """), {"id": flow_id, "val": watermark_value})
+            conn.commit()
+
+        return CatalogDB.get_flow(flow_id)
+
+    @staticmethod
+    def update_flow_watermark(flow_id: str, watermark_value: str, synced_at: datetime) -> Optional[Dict[str, Any]]:
+        """Updates flow watermark and last synced timestamp after successful sync."""
+        db_type, engine = get_db_connection()
+        if engine is None:
+            return None
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+            UPDATE dataflow_flows 
+            SET last_watermark_value = :val, last_synced_at = :synced_at, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+            """), {"id": flow_id, "val": watermark_value, "synced_at": synced_at})
             conn.commit()
 
         return CatalogDB.get_flow(flow_id)
@@ -811,6 +875,8 @@ class CatalogDB:
                 if f.get("source_request_json"):
                     f["source_request"] = json.loads(f["source_request_json"]) if isinstance(f.get("source_request_json"), str) else f.get("source_request_json")
                 f.pop("source_request_json", None)
+                f["destination_config"] = json.loads(f["destination_config_json"]) if isinstance(f.get("destination_config_json"), str) else (f.get("destination_config_json") or None)
+                f.pop("destination_config_json", None)
 
                 # Aggregate metrics for flow
                 agg_res = conn.execute(text("SELECT COUNT(*) AS ds_cnt, COALESCE(SUM(row_count), 0) AS total_rows FROM dataflow_staged_datasets WHERE flow_id = :fid"), {"fid": flow_id})
@@ -848,6 +914,8 @@ class CatalogDB:
                     if f.get("source_request_json"):
                         f["source_request"] = json.loads(f["source_request_json"]) if isinstance(f.get("source_request_json"), str) else f.get("source_request_json")
                     f.pop("source_request_json", None)
+                    f["destination_config"] = json.loads(f["destination_config_json"]) if isinstance(f.get("destination_config_json"), str) else (f.get("destination_config_json") or None)
+                    f.pop("destination_config_json", None)
 
                     fid = f["id"]
                     f["dataset_count"] = ds_map.get(fid, (0, 0))[0]
@@ -866,6 +934,7 @@ class CatalogDB:
         try:
             with engine.connect() as conn:
                 conn.execute(text("DELETE FROM dataflow_staged_records WHERE flow_id = :id"), {"id": flow_id})
+                conn.execute(text("DELETE FROM dataflow_flow_snapshots WHERE flow_id = :id"), {"id": flow_id})
                 conn.execute(text("DELETE FROM dataflow_staged_datasets WHERE flow_id = :id"), {"id": flow_id})
                 conn.execute(text("DELETE FROM dataflow_pipeline_jobs WHERE flow_id = :id"), {"id": flow_id})
                 conn.execute(text("DELETE FROM dataflow_flow_schedules WHERE flow_id = :id"), {"id": flow_id})
@@ -883,11 +952,112 @@ class CatalogDB:
             return False
 
     @staticmethod
-    def get_flow_rules(flow_id: str) -> Dict[str, Any]:
+    def get_flow_rules(flow_id: str) -> List[Dict[str, Any]]:
         f = CatalogDB.get_flow(flow_id)
         if f:
-            return {"flow_id": flow_id, "rules": f.get("rules", [])}
-        return {"flow_id": flow_id, "rules": []}
+            return f.get("rules", [])
+        return []
+
+    @staticmethod
+    def get_flow_snapshot(flow_id: str) -> Optional[Dict[str, Any]]:
+        _, engine = get_db_connection()
+        if engine is None:
+            raise RuntimeError("Metadata database is not connected.")
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT columns_json, rows_json, updated_at, pending_columns_json, pending_rows_json FROM dataflow_flow_snapshots WHERE flow_id = :flow_id"),
+                {"flow_id": flow_id},
+            ).fetchone()
+        if not row:
+            return None
+        columns = row[0] if isinstance(row[0], list) else json.loads(row[0])
+        rows = row[1] if isinstance(row[1], list) else json.loads(row[1])
+        pending_columns = row[3] if isinstance(row[3], list) else (json.loads(row[3]) if row[3] else None)
+        pending_rows = row[4] if isinstance(row[4], list) else (json.loads(row[4]) if row[4] else None)
+        return {"flow_id": flow_id, "columns": columns, "rows": rows, "updated_at": _format_row({"updated_at": row[2]}).get("updated_at"), "pending_columns": pending_columns, "pending_rows": pending_rows}
+
+    @staticmethod
+    def save_flow_snapshot(flow_id: str, columns: List[str], rows: List[Dict[str, Any]]) -> None:
+        _, engine = get_db_connection()
+        if engine is None:
+            raise RuntimeError("Metadata database is not connected.")
+        params = {
+            "flow_id": flow_id,
+            "columns_json": json.dumps(columns),
+            "rows_json": json.dumps(rows, ensure_ascii=False),
+        }
+        with engine.begin() as conn:
+            if _GLOBAL_ENGINE_TYPE == "postgres":
+                conn.execute(text("""
+                    INSERT INTO dataflow_flow_snapshots (flow_id, columns_json, rows_json, updated_at)
+                    VALUES (:flow_id, :columns_json, :rows_json, CURRENT_TIMESTAMP)
+                    ON CONFLICT (flow_id) DO UPDATE SET
+                        columns_json = EXCLUDED.columns_json,
+                        rows_json = EXCLUDED.rows_json,
+                        pending_columns_json = NULL,
+                        pending_rows_json = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                """), params)
+            else:
+                conn.execute(text("""
+                    INSERT INTO dataflow_flow_snapshots (flow_id, columns_json, rows_json, updated_at)
+                    VALUES (:flow_id, :columns_json, :rows_json, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                        columns_json = VALUES(columns_json),
+                        rows_json = VALUES(rows_json),
+                        pending_columns_json = NULL,
+                        pending_rows_json = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                """), params)
+
+    @staticmethod
+    def save_pending_flow_snapshot(flow_id: str, columns: List[str], rows: List[Dict[str, Any]]) -> None:
+        _, engine = get_db_connection()
+        if engine is None:
+            raise RuntimeError("Metadata database is not connected.")
+        params = {
+            "flow_id": flow_id,
+            "columns_json": json.dumps(columns) if columns else None,
+            "rows_json": json.dumps(rows, ensure_ascii=False) if rows else None,
+        }
+        with engine.begin() as conn:
+            if _GLOBAL_ENGINE_TYPE == "postgres":
+                conn.execute(text("""
+                    INSERT INTO dataflow_flow_snapshots (flow_id, columns_json, rows_json, pending_columns_json, pending_rows_json, updated_at)
+                    VALUES (:flow_id, '[]', '[]', CAST(:columns_json AS JSON), :rows_json, CURRENT_TIMESTAMP)
+                    ON CONFLICT (flow_id) DO UPDATE SET pending_columns_json = EXCLUDED.pending_columns_json,
+                        pending_rows_json = EXCLUDED.pending_rows_json, updated_at = CURRENT_TIMESTAMP
+                """), params)
+            else:
+                conn.execute(text("""
+                    INSERT INTO dataflow_flow_snapshots (flow_id, columns_json, rows_json, pending_columns_json, pending_rows_json, updated_at)
+                    VALUES (:flow_id, '[]', '[]', :columns_json, :rows_json, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE pending_columns_json = VALUES(pending_columns_json),
+                        pending_rows_json = VALUES(pending_rows_json), updated_at = CURRENT_TIMESTAMP
+                """), params)
+
+    @staticmethod
+    def promote_pending_flow_snapshot(flow_id: str) -> None:
+        _, engine = get_db_connection()
+        if engine is None:
+            raise RuntimeError("Metadata database is not connected.")
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE dataflow_flow_snapshots
+                SET columns_json = pending_columns_json, rows_json = pending_rows_json,
+                    pending_columns_json = NULL,
+                    pending_rows_json = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE flow_id = :flow_id AND pending_rows_json IS NOT NULL
+            """), {"flow_id": flow_id})
+
+    @staticmethod
+    def clear_pending_flow_snapshot(flow_id: str) -> None:
+        _, engine = get_db_connection()
+        if engine is None:
+            return
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE dataflow_flow_snapshots SET pending_columns_json = NULL, pending_rows_json = NULL WHERE flow_id = :flow_id"), {"flow_id": flow_id})
 
     # --- STAGED DATASETS ---
     @staticmethod

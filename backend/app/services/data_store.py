@@ -1,6 +1,7 @@
 import os
 import json
 import urllib.parse
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
@@ -8,6 +9,8 @@ import pandas as pd
 from sqlalchemy import text
 from ..config import settings
 from ..models.db_models import get_db_connection, init_db
+
+logger = logging.getLogger(__name__)
 
 class DataStoreEngine:
     """
@@ -51,6 +54,8 @@ class DataStoreEngine:
         - `incremental_merge`: Upserts records matching primary_key with latest aud_last_update
         Returns: (storage_path, storage_format, size_bytes, total_row_count, new_watermark_value)
         """
+        if sync_mode == "snapshot_detect":
+            sync_mode = "full"
         records = df.to_dict(orient="records")
         db_type, engine = get_db_connection()
         if engine is None:
@@ -204,7 +209,7 @@ class DataStoreEngine:
                         data = [json.loads(r[0]) for r in rows]
                         loaded_df = pd.DataFrame(data)
             except Exception as e:
-                print(f"[WARN] Failed to load staged dataframe from {db_type}: {e}")
+                logger.warning(f"Failed to load staged dataframe from {db_type}: {e}")
 
         # Fallback to local parquet if present
         if loaded_df is None and storage_path and Path(storage_path).exists():
@@ -264,7 +269,7 @@ class DataStoreEngine:
                         cols = list(rows[0].keys())
                     return rows, total_rows, cols
             except Exception as e:
-                print(f"[WARN] Staged preview slice error on {db_type}: {e}")
+                logger.warning(f"Staged preview slice error on {db_type}: {e}")
 
         return [], 0, cols
 
@@ -280,4 +285,4 @@ class DataStoreEngine:
                     conn.execute(text("DELETE FROM dataflow_staged_records WHERE dataset_id = :did"), {"did": dataset_id})
                     conn.commit()
             except Exception as e:
-                print(f"[WARN] Failed to drop staged records for {dataset_id}: {e}")
+                logger.warning(f"Failed to drop staged records for {dataset_id}: {e}")

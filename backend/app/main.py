@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,17 +23,25 @@ except Exception as _e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: ensure databases and start background cron scheduler
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         init_db()
         SchedulerService.start()
+        logger.info("Application startup completed successfully.")
     except Exception as e:
-        print(f"Error during startup: {e}")
+        logger.error(f"Error during startup: {e}", exc_info=True)
     yield
     # Shutdown: graceful stop
     try:
         SchedulerService.shutdown()
+        # Stop Spark session to prevent memory leaks
+        from .engine.spark_session import spark_manager
+        spark_manager.stop_session()
+        logger.info("Application shutdown completed successfully.")
     except Exception as e:
-        print(f"Error during shutdown: {e}")
+        logger.error(f"Error during shutdown: {e}", exc_info=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -42,9 +51,10 @@ app = FastAPI(
 )
 
 # Enable CORS for React frontend
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in allowed_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -2,6 +2,14 @@ import os
 import urllib.parse
 from pathlib import Path
 from pydantic import BaseModel
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -20,9 +28,10 @@ def load_env_file(env_path: Path):
                         k = k.strip()
                         v = v.strip().strip("'\"")
                         # Do not overwrite existing environment variables if already set
-                        os.environ[k] = v
+                        if k not in os.environ:
+                            os.environ[k] = v
         except Exception as e:
-            print(f"[WARN] Failed to load .env from {env_path}: {e}")
+            logger.warning(f"Failed to load .env from {env_path}: {e}")
 
 # Load backend .env file
 load_env_file(BASE_DIR / ".env")
@@ -34,6 +43,15 @@ class Settings(BaseModel):
     SPARK_APP_NAME: str = "DataFlowStudioEngine"
     SPARK_MASTER: str = "local[*]"
     DEFAULT_PAGE_SIZE: int = 50
+    
+    # Query timeout settings (in seconds)
+    DB_QUERY_TIMEOUT: int = int(os.getenv("DB_QUERY_TIMEOUT", "300"))
+    DB_CONNECTION_TIMEOUT: int = int(os.getenv("DB_CONNECTION_TIMEOUT", "15"))
+    
+    # Connection pool settings
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "300"))
 
     # Active Metadata Storage Engine: 'mysql' or 'postgres'
     METADATA_ENGINE: str = os.getenv("METADATA_ENGINE", "mysql").lower()
@@ -42,7 +60,7 @@ class Settings(BaseModel):
     MYSQL_HOST: str = os.getenv("MYSQL_HOST", "localhost")
     MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
     MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
-    MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "3435")
+    MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "")
     MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "dataflow_metadata")
 
     # PostgreSQL Metadata Storage Config
