@@ -1,11 +1,14 @@
 command:
-  - python
-  - run.py
+  - bash
+  - -lc
+  - >-
+    python -m pip install --no-cache-dir -r backend/requirements.txt &&
+    cd frontend && npm ci && npm run build &&
+    cd ../backend && python run.py
 env:
-  # `postgres` must also be added as a Lakebase Autoscaling database resource
-  # in the Databricks Apps UI (Can connect and create). That resource injects
-  # PGHOST, PGPORT, PGUSER, PGDATABASE, and PGSSLMODE. Databricks injects the
-  # app service-principal identity used by WorkspaceClient; never hardcode tokens.
+  # Add a Lakebase Autoscaling database resource with key `postgres`
+  # in the Databricks Apps UI. It injects PGHOST/PGPORT/PGUSER/PGDATABASE
+  # and app identity. Never put a database password or OAuth token here.
   - name: METADATA_ENGINE
     value: postgres
   - name: LAKEBASE_MODE

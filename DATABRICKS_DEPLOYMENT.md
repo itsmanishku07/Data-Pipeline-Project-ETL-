@@ -1,6 +1,6 @@
 # Deploy DataFlow Studio to Databricks Apps with Lakebase
 
-This deployment packages the React frontend into FastAPI and uses a Lakebase PostgreSQL database for application metadata and staging records.
+This deployment packages the React frontend into FastAPI and uses a Lakebase PostgreSQL database for application metadata and staging records. Databricks Apps deploys the repository root; `app.yaml` is at the root.
 
 ## Architecture
 
@@ -19,13 +19,11 @@ npm ci
 npm run build
 ```
 
-Vite writes production assets to `backend/frontend_dist`. Deploy the **contents of `backend/`**, including:
+Vite writes production assets to `backend/frontend_dist`. Deploy the **repository root**, which includes:
 
 - `app.yaml`
-- `app/`
-- `run.py`
-- `requirements.txt`
-- `frontend_dist/`
+- `backend/app/`, `backend/run.py`, and `backend/requirements.txt`
+- `frontend/` and its `package-lock.json`
 
 Do not deploy `.env`, a virtual environment, `node_modules`, or local test databases. Databricks Apps supports project files up to 10 MB each; check the built assets and bundle against your workspace limits.
 
@@ -33,15 +31,15 @@ Do not deploy `.env`, a virtual environment, `node_modules`, or local test datab
 
 1. Create or select a Lakebase project and production branch, and select its database (normally `databricks_postgres`).
 2. In Databricks Apps, create/edit the app and add a **Lakebase Autoscaling database** resource with key **`postgres`** and the **Can connect and create** permission.
-3. The resource supplies `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, and `PGSSLMODE`. Set `LAKEBASE_ENDPOINT` in `backend/app.yaml` to the Lakebase endpoint path `projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>`; it is distinct from the injected PostgreSQL host.
-4. Set `POSTGRES_SCHEMA=dataflow_studio` in `backend/app.yaml`. Startup creates that schema and the application's tables. Do not manually point the app at another application's schema.
+3. The resource supplies `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, and `PGSSLMODE`. `valueFrom: postgres` sets `LAKEBASE_ENDPOINT` to the Lakebase endpoint path.
+4. `app.yaml` sets `POSTGRES_SCHEMA=dataflow_studio`. Startup creates that schema and the application's tables. Do not manually point the app at another application's schema.
 5. The App service principal must retain the database resource permission after deployment. Do not put a Lakebase password or Databricks token in source control or `app.yaml`.
 
-The deployed code expects `databricks-sdk` to be installed and the Lakebase endpoint path to be configured explicitly. Databricks' app resource `valueFrom: postgres` resolves to a Lakebase endpoint path; set the Lakebase resource in the app configuration and confirm `LAKEBASE_ENDPOINT` resolves to the documented `projects/.../branches/.../endpoints/...` path before starting the app. `PGHOST`, `PGUSER`, and `PGDATABASE` are separately injected connection values.
+The deployed code expects `databricks-sdk` to be installed. Databricks injects app service-principal identity; the backend obtains a short-lived database credential at connection time. `PGHOST`, `PGUSER`, and `PGDATABASE` are connection values, while `LAKEBASE_ENDPOINT` identifies the endpoint for credential generation.
 
 ## Deploy
 
-Create a Databricks App in the workspace, upload/deploy the backend directory, add the Lakebase resource as above, and deploy. The `backend/app.yaml` command starts Uvicorn using `DATABRICKS_APP_PORT` (with `PORT` fallback locally). Databricks Apps documentation currently provides the port automatically for FastAPI/Uvicorn; the explicit command uses that environment variable.
+Create a Databricks App in the workspace, connect its Git source to the repository root (or upload the root directory), add the Lakebase resource as above, and deploy. The root `app.yaml` installs Python dependencies, builds Vite assets, then launches `backend/run.py`. The server uses `DATABRICKS_APP_PORT` (with `PORT` fallback locally).
 
 After deployment, verify:
 
