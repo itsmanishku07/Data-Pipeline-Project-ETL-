@@ -6,7 +6,7 @@ command:
     cd frontend && npm ci && npm run build &&
     cd ../backend && python run.py
 env:
-  # Add a Lakebase Autoscaling database resource with key `postgres`
+  # Add a Lakebase Autoscaling database resource with key `database`
   # in the Databricks Apps UI. It injects PGHOST/PGPORT/PGUSER/PGDATABASE
   # and app identity. Never put a database password or OAuth token here.
   - name: METADATA_ENGINE
@@ -14,7 +14,7 @@ env:
   - name: LAKEBASE_MODE
     value: "true"
   - name: LAKEBASE_ENDPOINT
-    valueFrom: postgres
+    valueFrom: database
   - name: POSTGRES_SCHEMA
     value: dataflow_studio
   - name: POSTGRES_SEARCH_PATH
