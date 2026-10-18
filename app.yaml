@@ -2,7 +2,7 @@ command:
   - bash
   - -lc
   - >-
-    python -m pip install --user --no-cache-dir -r backend/requirements.txt &&
+    python -m pip install --no-cache-dir -r backend/requirements.txt &&
     python backend/run.py
 env:
   # Using Lakebase database resource with key `database`
