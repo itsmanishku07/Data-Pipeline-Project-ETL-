@@ -95,6 +95,10 @@ class Settings(BaseModel):
     def get_active_metadata_url(self) -> str:
         if self.METADATA_ENGINE == "postgres":
             return self.get_postgres_metadata_url()
+        elif self.METADATA_ENGINE == "sqlite":
+            import os
+            os.makedirs("storage", exist_ok=True)
+            return "sqlite:///storage/app.db"
         return self.get_mysql_metadata_url()
 
 settings = Settings()
