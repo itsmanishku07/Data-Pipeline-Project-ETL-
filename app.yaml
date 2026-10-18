@@ -3,7 +3,7 @@ command:
   - -lc
   - >-
     python -m pip install --no-cache-dir -r backend/requirements.txt &&
-    python backend/run.py
+    cd backend && python run.py
 env:
   # Using Lakebase database resource with key `database`
   - name: METADATA_ENGINE
